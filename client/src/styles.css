@@ -125,7 +125,7 @@ textarea.field { resize: vertical; min-height: 64px; }
 .page-actions { display: flex; gap: 6px; }
 .page-status { padding: 64px 24px; text-align: center; }
 .btn.danger { color: var(--err); }
-a.btn { text-decoration: none; }
+a.btn { text-decoration: none; color: var(--ink); }
 .linkish { border: 0; background: none; padding: 0; color: var(--ink); text-decoration: underline; cursor: pointer; }
 .linkish:disabled { color: var(--muted); text-decoration: none; cursor: default; }
 .aside-line { margin-top: 16px; color: var(--muted); font-size: 13px; }
@@ -134,6 +134,7 @@ a.btn { text-decoration: none; }
 .section.first { margin-top: 8px; }
 .section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--rule); padding-bottom: 10px; flex-wrap: wrap; }
 .section-head h2 { font-size: 28px; margin: 0; }
+.section-head + .runs, .section-head + .timeline, .section-head + .empty-row { border-top: 0; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 20px; }
 .card {

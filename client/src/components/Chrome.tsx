@@ -45,7 +45,7 @@ export function RunList({ runs, showMatter, empty }: { runs: RunSummary[]; showM
         <a key={r.id} className="run-row" role="row" href={`#/r/${r.id}`}>
           <span title={dateTime(r.startedAt)}>{relTime(r.startedAt)}</span>
           <span className="run-name">
-            {r.deckName}
+            {r.deckName.replace(/\.pdf$/i, "")}
             {showMatter && <span className="hint"> · {r.matterName}</span>}
           </span>
           <span className="num">{duration(r.stats.durationMs)}</span>

@@ -1,0 +1,448 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
+import postgres from "postgres";
+import {
+  normalizeRegions,
+  summarizeRun,
+  type DeckDetail,
+  type DeckPatch,
+  type DeckRecord,
+  type DeckSummary,
+  type HomeData,
+  type Matter,
+  type MatterDetail,
+  type Region,
+  type Run,
+  type RunDetail,
+  type RunEvent,
+  type RunInput,
+  type RunSummary,
+  type Slide,
+} from "../../shared/schema.ts";
+import type { Library } from "./store.ts";
+
+/** Where PDFs and thumbnails go. Supabase Storage in production; swappable for tests. */
+export interface BlobStore {
+  put(path: string, data: Buffer, contentType: string): Promise<void>;
+  get(path: string): Promise<Buffer | null>;
+  remove(paths: string[]): Promise<void>;
+}
+
+export const BUCKET = "producer-decks";
+
+export function supabaseBlobs(url: string, key: string, bucket = BUCKET): BlobStore {
+  const storage = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }).storage.from(bucket);
+  return {
+    async put(path, data, contentType) {
+      const { error } = await storage.upload(path, data, { contentType, upsert: true });
+      if (error) throw new Error(`Storage upload failed for ${path}: ${error.message}`);
+    },
+    async get(path) {
+      const { data, error } = await storage.download(path);
+      if (error || !data) return null;
+      return Buffer.from(await data.arrayBuffer());
+    },
+    async remove(paths) {
+      if (paths.length === 0) return;
+      const { error } = await storage.remove(paths);
+      if (error) console.error(`Storage delete failed: ${error.message}`);
+    },
+  };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Ids come from URLs; anything that isn't a uuid simply doesn't exist (rather than a Postgres cast error). */
+const isId = (id: string) => UUID.test(id);
+const ms = (d: Date | null) => (d ? d.getTime() : null);
+const RECENT_RUNS = 25;
+
+/* Row shapes as they come back from Postgres (postgres.js: timestamptz → Date). */
+interface MatterRow {
+  id: string;
+  name: string;
+  created_at: Date;
+  updated_at: Date;
+}
+interface DeckRow {
+  id: string;
+  matter_id: string;
+  name: string;
+  pdf_hash: string;
+  slide_count: number;
+  analyzed: boolean;
+  pdf_path: string;
+  thumb_path: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+interface RegionRow {
+  slide_index: number;
+  region_key: string;
+  label: string;
+  description: string;
+  keywords: string[];
+  box_x: number;
+  box_y: number;
+  box_w: number;
+  box_h: number;
+}
+interface RunRow {
+  id: string;
+  deck_id: string;
+  deck_name: string;
+  slide_count: number;
+  engine: string | null;
+  started_at: Date;
+  ended_at: Date;
+  slides_visited: number;
+  zooms: number;
+  commands: number;
+  words: number;
+  matter_id: string;
+  matter_name: string;
+}
+interface EventRow {
+  t_ms: number;
+  type: RunEvent["type"];
+  slide_index: number;
+  region_key: string | null;
+  label: string | null;
+  command: string | null;
+  text: string | null;
+  simulated: boolean;
+}
+
+const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
+
+function toDeckBase(r: DeckRow): Omit<DeckRecord, "slides"> {
+  return {
+    id: r.id,
+    matterId: r.matter_id,
+    name: r.name,
+    pdfHash: r.pdf_hash,
+    slideCount: r.slide_count,
+    analyzed: r.analyzed,
+    hasThumb: r.thumb_path !== null,
+    createdAt: ms(r.created_at)!,
+    updatedAt: ms(r.updated_at)!,
+  };
+}
+
+function toSlides(slideCount: number, rows: RegionRow[]): Slide[] {
+  const slides: Slide[] = Array.from({ length: slideCount }, (_, index) => ({ index, regions: [] }));
+  for (const r of rows) {
+    slides[r.slide_index]?.regions.push({
+      id: r.region_key,
+      label: r.label,
+      description: r.description,
+      keywords: r.keywords,
+      box: { x: r.box_x, y: r.box_y, w: r.box_w, h: r.box_h },
+    });
+  }
+  return slides;
+}
+
+function toRunSummary(r: RunRow): RunSummary {
+  return {
+    id: r.id,
+    deckId: r.deck_id,
+    matterId: r.matter_id,
+    matterName: r.matter_name,
+    deckName: r.deck_name,
+    slideCount: r.slide_count,
+    engine: r.engine,
+    startedAt: ms(r.started_at)!,
+    endedAt: ms(r.ended_at)!,
+    stats: {
+      durationMs: r.ended_at.getTime() - r.started_at.getTime(),
+      slidesVisited: r.slides_visited,
+      zooms: r.zooms,
+      commands: r.commands,
+      words: r.words,
+    },
+  };
+}
+
+function toEvent(e: EventRow): RunEvent {
+  const base = { t: e.t_ms, slide: e.slide_index };
+  switch (e.type) {
+    case "slide":
+      return { ...base, type: "slide" };
+    case "zoom":
+      return { ...base, type: "zoom", regionId: e.region_key ?? "", label: e.label ?? "" };
+    case "command":
+      return { ...base, type: "command", command: e.command ?? "", text: e.text ?? "" };
+    case "heard":
+      return { ...base, type: "heard", text: e.text ?? "", ...(e.simulated ? { simulated: true } : {}) };
+  }
+}
+
+function regionRows(slides: Slide[], slideCount: number) {
+  return slides
+    .filter((s) => s.index >= 0 && s.index < slideCount)
+    .flatMap((s) =>
+      normalizeRegions(s.regions).map((r: Region, position) => ({
+        slide_index: s.index,
+        position,
+        region_key: r.id,
+        label: r.label.trim().slice(0, 200) || "Region",
+        description: r.description,
+        keywords: r.keywords,
+        box_x: r.box.x,
+        box_y: r.box.y,
+        box_w: r.box.w,
+        box_h: r.box.h,
+      })),
+    );
+}
+
+/**
+ * Matters, decks, regions and runs in the `producer` Postgres schema (see supabase/migrations), PDFs and thumbnails
+ * in Supabase Storage. Connects directly to Postgres, so the schema never has to be exposed through the Data API.
+ */
+export class SupabaseStore implements Library {
+  readonly where: string;
+
+  constructor(
+    private readonly sql: postgres.Sql,
+    private readonly blobs: BlobStore,
+    where = "Supabase",
+  ) {
+    this.where = where;
+  }
+
+  static fromEnv(env: NodeJS.ProcessEnv): SupabaseStore {
+    const key = env.SUPABASE_SECRET_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!env.DATABASE_URL || !env.SUPABASE_URL || !key) {
+      throw new Error("Supabase needs DATABASE_URL, SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY).");
+    }
+    // prepare: false so it also works through Supabase's transaction pooler (port 6543).
+    const sql = postgres(env.DATABASE_URL, { prepare: false, max: 5, idle_timeout: 30, onnotice: () => {} });
+    return new SupabaseStore(sql, supabaseBlobs(env.SUPABASE_URL, key), `Supabase (${new URL(env.SUPABASE_URL).host})`);
+  }
+
+  /** Fails fast at startup if the migration hasn't been applied. */
+  async check(): Promise<void> {
+    const [row] = await this.sql<{ ok: string | null }[]>`select to_regclass('producer.matters')::text as ok`;
+    if (!row?.ok) throw new Error("The producer schema is missing. Apply supabase/migrations to your Supabase project.");
+  }
+
+  async close() {
+    await this.sql.end();
+  }
+
+  /* ---------- reads ---------- */
+
+  async home(): Promise<HomeData> {
+    const [matters, runs] = await Promise.all([
+      this.sql<(MatterRow & { deck_count: number; run_count: number; last_run_at: Date | null; thumb_deck_id: string | null })[]>`
+        select * from producer.matter_summaries order by updated_at desc`,
+      this.sql<RunRow[]>`select * from producer.run_summaries order by started_at desc limit ${RECENT_RUNS}`,
+    ]);
+    return {
+      matters: matters.map((m) => ({
+        ...toMatter(m),
+        deckCount: m.deck_count,
+        runCount: m.run_count,
+        lastRunAt: ms(m.last_run_at),
+        thumbDeckId: m.thumb_deck_id,
+      })),
+      runs: runs.map(toRunSummary),
+    };
+  }
+
+  async matter(id: string): Promise<MatterDetail | null> {
+    if (!isId(id)) return null;
+    const [[m], decks, runs] = await Promise.all([
+      this.sql<MatterRow[]>`select * from producer.matters where id = ${id}`,
+      this.sql<(DeckRow & { region_count: number; run_count: number; last_run_at: Date | null })[]>`
+        select * from producer.deck_summaries where matter_id = ${id} order by updated_at desc`,
+      this.sql<RunRow[]>`select * from producer.run_summaries where matter_id = ${id} order by started_at desc limit 200`,
+    ]);
+    if (!m) return null;
+    return {
+      matter: toMatter(m),
+      decks: decks.map(
+        (d): DeckSummary => ({ ...toDeckBase(d), regionCount: d.region_count, runCount: d.run_count, lastRunAt: ms(d.last_run_at) }),
+      ),
+      runs: runs.map(toRunSummary),
+    };
+  }
+
+  private async deckRecord(id: string, sql: postgres.Sql | postgres.TransactionSql = this.sql) {
+    const [d] = await sql<(DeckRow & { matter_name: string })[]>`
+      select d.*, m.name as matter_name from producer.decks d join producer.matters m on m.id = d.matter_id where d.id = ${id}`;
+    if (!d) return null;
+    const regions = await sql<RegionRow[]>`
+      select * from producer.regions where deck_id = ${id} order by slide_index, position`;
+    return { row: d, record: { ...toDeckBase(d), slides: toSlides(d.slide_count, regions) } };
+  }
+
+  async deck(id: string): Promise<DeckDetail | null> {
+    if (!isId(id)) return null;
+    const d = await this.deckRecord(id);
+    return d && { ...d.record, matterName: d.row.matter_name };
+  }
+
+  async run(id: string): Promise<RunDetail | null> {
+    if (!isId(id)) return null;
+    const [[r], events] = await Promise.all([
+      this.sql<RunRow[]>`select * from producer.run_summaries where id = ${id}`,
+      this.sql<EventRow[]>`select * from producer.run_events where run_id = ${id} order by seq`,
+    ]);
+    if (!r) return null;
+    // Runs are deleted with their deck, so a run that exists always has its deck.
+    return { ...toRunSummary(r), events: events.map(toEvent), deckExists: true };
+  }
+
+  async pdf(deckId: string): Promise<Buffer | null> {
+    if (!isId(deckId)) return null;
+    const [d] = await this.sql<{ pdf_path: string }[]>`select pdf_path from producer.decks where id = ${deckId}`;
+    return d ? this.blobs.get(d.pdf_path) : null;
+  }
+
+  async thumb(deckId: string): Promise<Buffer | null> {
+    if (!isId(deckId)) return null;
+    const [d] = await this.sql<{ thumb_path: string | null }[]>`select thumb_path from producer.decks where id = ${deckId}`;
+    return d?.thumb_path ? this.blobs.get(d.thumb_path) : null;
+  }
+
+  /* ---------- writes ---------- */
+
+  async createMatter(name: string): Promise<Matter> {
+    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name) values (${name}) returning *`;
+    return toMatter(m);
+  }
+
+  async renameMatter(id: string, name: string): Promise<Matter | null> {
+    if (!isId(id)) return null;
+    const [m] = await this.sql<MatterRow[]>`update producer.matters set name = ${name} where id = ${id} returning *`;
+    return m ? toMatter(m) : null;
+  }
+
+  async deleteMatter(id: string): Promise<boolean> {
+    if (!isId(id)) return false;
+    const files = await this.sql<{ pdf_path: string; thumb_path: string | null }[]>`
+      select pdf_path, thumb_path from producer.decks where matter_id = ${id}`;
+    const deleted = await this.sql`delete from producer.matters where id = ${id}`;
+    if (deleted.count === 0) return false;
+    await this.blobs.remove(files.flatMap((f) => [f.pdf_path, f.thumb_path ?? []].flat()));
+    return true;
+  }
+
+  async createDeck(matterId: string, name: string, pdf: Buffer, slideCount: number): Promise<DeckRecord | null> {
+    if (!isId(matterId)) return null;
+    const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
+    if (!exists) return null;
+    const id = randomUUID();
+    const pdfPath = `${id}/deck.pdf`;
+    await this.blobs.put(pdfPath, pdf, "application/pdf");
+    try {
+      const [d] = await this.sql<DeckRow[]>`
+        insert into producer.decks (id, matter_id, name, pdf_hash, slide_count, pdf_path)
+        values (${id}, ${matterId}, ${name.slice(0, 200)}, ${createHash("sha256").update(pdf).digest("hex")}, ${slideCount}, ${pdfPath})
+        returning *`;
+      return { ...toDeckBase(d), slides: toSlides(slideCount, []) };
+    } catch (e) {
+      await this.blobs.remove([pdfPath]);
+      throw e;
+    }
+  }
+
+  async patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null> {
+    if (!isId(id)) return null;
+    return this.sql.begin(async (tx) => {
+      const [d] = await tx<DeckRow[]>`
+        update producer.decks set
+          name = coalesce(${patch.name ?? null}, name),
+          analyzed = coalesce(${patch.analyzed ?? null}, analyzed)
+        where id = ${id} returning *`;
+      if (!d) return null;
+      if (patch.slides) {
+        // Replace the deck's regions wholesale; small (tens of rows) and keeps ordering exact.
+        await tx`delete from producer.regions where deck_id = ${id}`;
+        const rows = regionRows(patch.slides, d.slide_count);
+        if (rows.length) {
+          await tx`
+            insert into producer.regions
+              (deck_id, slide_index, position, region_key, label, description, keywords, box_x, box_y, box_w, box_h)
+            select ${id}, x.slide_index, x.position, x.region_key, x.label, x.description, x.keywords,
+                   x.box_x, x.box_y, x.box_w, x.box_h
+            from jsonb_to_recordset(${tx.json(rows)}::jsonb) as x(
+              slide_index int, position int, region_key text, label text, description text, keywords text[],
+              box_x float8, box_y float8, box_w float8, box_h float8)`;
+        }
+      }
+      return (await this.deckRecord(id, tx))!.record;
+    });
+  }
+
+  async setThumb(id: string, jpeg: Buffer): Promise<boolean> {
+    if (!isId(id)) return false;
+    const [exists] = await this.sql`select 1 from producer.decks where id = ${id}`;
+    if (!exists) return false;
+    const path = `${id}/thumb.jpg`;
+    await this.blobs.put(path, jpeg, "image/jpeg");
+    await this.sql`update producer.decks set thumb_path = ${path} where id = ${id}`;
+    return true;
+  }
+
+  async deleteDeck(id: string): Promise<boolean> {
+    if (!isId(id)) return false;
+    const [d] = await this.sql<{ pdf_path: string; thumb_path: string | null }[]>`
+      delete from producer.decks where id = ${id} returning pdf_path, thumb_path`;
+    if (!d) return false;
+    await this.blobs.remove([d.pdf_path, ...(d.thumb_path ? [d.thumb_path] : [])]);
+    return true;
+  }
+
+  async addRun(input: RunInput): Promise<Run | null> {
+    if (!isId(input.deckId)) return null;
+    const stats = summarizeRun(input);
+    return this.sql.begin(async (tx) => {
+      const [d] = await tx<{ name: string; slide_count: number; matter_id: string }[]>`
+        select name, slide_count, matter_id from producer.decks where id = ${input.deckId}`;
+      if (!d) return null;
+      const [r] = await tx<{ id: string }[]>`
+        insert into producer.runs
+          (deck_id, deck_name, slide_count, engine, started_at, ended_at, slides_visited, zooms, commands, words)
+        values (${input.deckId}, ${d.name}, ${d.slide_count}, ${input.engine},
+                ${new Date(input.startedAt)}, ${new Date(Math.max(input.endedAt, input.startedAt))},
+                ${stats.slidesVisited}, ${stats.zooms}, ${stats.commands}, ${stats.words})
+        returning id`;
+      const events = input.events.map((e, seq) => ({
+        seq,
+        t_ms: Math.max(0, Math.round(e.t)),
+        type: e.type,
+        slide_index: Math.max(0, e.slide),
+        region_key: e.type === "zoom" ? e.regionId : null,
+        label: e.type === "zoom" ? e.label : null,
+        command: e.type === "command" ? e.command : null,
+        text: e.type === "command" || e.type === "heard" ? e.text : null,
+        simulated: e.type === "heard" && !!e.simulated,
+      }));
+      if (events.length) {
+        await tx`
+          insert into producer.run_events (run_id, seq, t_ms, type, slide_index, region_key, label, command, text, simulated)
+          select ${r.id}, x.seq, x.t_ms, x.type, x.slide_index, x.region_key, x.label, x.command, x.text, x.simulated
+          from jsonb_to_recordset(${tx.json(events)}::jsonb) as x(
+            seq int, t_ms int, type text, slide_index int, region_key text, label text, command text, text text,
+            simulated boolean)`;
+      }
+      return {
+        ...input,
+        id: r.id,
+        matterId: d.matter_id,
+        deckName: d.name,
+        slideCount: d.slide_count,
+        stats,
+      };
+    });
+  }
+
+  async deleteRun(id: string): Promise<boolean> {
+    if (!isId(id)) return false;
+    const r = await this.sql`delete from producer.runs where id = ${id}`;
+    return r.count > 0;
+  }
+}

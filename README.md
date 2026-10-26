@@ -17,8 +17,8 @@ Get an API key at [console.anthropic.com](https://console.anthropic.com). It's b
 Claude Pro/Max subscription. The server reloads automatically when you save `.env`. If Claude declines a slide on
 safety grounds, the request is re-run on Anthropic's recommended fallback model (`fallbacks: "default"`).
 
-No API key? Click **Load sample deck**. It ships with hand-checked regions, so you can try the whole flow without
-calling the vision model.
+No API key? On the home page, click **Try the sample deck**. It ships with hand-checked regions, so you can try the
+whole flow without calling the vision model.
 
 | Script | What it does |
 |---|---|
@@ -27,17 +27,52 @@ calling the vision model.
 | `npm run build` | Type-check + production build of the client, type-check of the server |
 | `npm run make-sample` | Regenerates `client/public/sample/sample.pdf` + `sample.regions.json` |
 
+## Matters, presentations and runs
+
+- **Home** (`#/`) lists your matters, most recently active first, and a **Recent runs** feed across all of them.
+- A **matter** is one project. It holds its presentations (PDF decks) and that matter's run history. Click **New
+  matter** to start one.
+- A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
+  records the slides shown, every zoom, every voice command and what was heard. Its page shows the stats and a
+  slide-by-slide timeline.
+- Region edits autosave as you work. The top bar shows Saving…/Saved.
+
+## Storage: Supabase or local
+
+**Supabase** (used when `DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_SECRET_KEY` are set in `.env`): data lives in a
+dedicated `producer` Postgres schema, defined in `supabase/migrations/`:
+
+| Table | Holds |
+|---|---|
+| `producer.matters` | Projects |
+| `producer.decks` | Presentations: name, PDF hash, slide count, analyzed flag, Storage paths |
+| `producer.regions` | One row per region: slide, order, label, description, `keywords text[]`, box (CHECKed to stay on the slide) |
+| `producer.runs` | One row per presentation run, with stored stats |
+| `producer.run_events` | The run timeline: slide changes, zooms, voice commands, what was heard |
+
+Deleting a matter cascades to its decks, regions, runs and events. Triggers keep `updated_at` and each matter's
+last-activity time current. The views `matter_summaries`, `deck_summaries` and `run_summaries` feed the lists. PDFs and
+thumbnails go to the private Storage bucket `producer-decks`. The server talks to Postgres directly, so the schema isn't
+exposed through the Data API: RLS is on with no policies, and the `anon`/`authenticated` roles have no grants.
+
+The GitHub integration applies the migration when it's pushed to the production branch. You can also paste the SQL
+file into the Supabase SQL editor. The server refuses to start if Supabase is configured but the schema is missing.
+
+**Local** (when those variables are empty): `data/db.json` plus `data/decks/<id>/deck.pdf` and `thumb.jpg`. Set
+`DATA_DIR` to put it elsewhere. Local data isn't copied to Supabase when you switch.
+
 ## Flow
 
-1. **Upload** a PDF. Each page is rendered to an image in the browser with pdf.js. If you drop a `.regions.json`
-   alongside it, analysis is skipped.
+1. **Add a presentation** to a matter: drop a PDF on the **Add a presentation** card. Each page is rendered to an
+   image in the browser with pdf.js, and the PDF is stored in the matter. If you drop a `.regions.json` alongside it,
+   analysis is skipped.
 2. **Analyze**: each slide image goes to `POST /api/analyze`, which asks Claude (`VISION_MODEL`, default
    `claude-opus-5-5`, structured JSON output) for 3–8 regions with a label, description, 5–10 spoken keywords and a bounding box. The response is
    validated with zod, boxes are clamped to the slide, and an invalid answer is retried once with the error fed back.
-   Two slides are analyzed at a time.
+   Two slides are analyzed at a time. Slides that already have regions are skipped, so you can leave and come back.
 3. **Review**: drag boxes to move them, pull corners to resize, drag on empty space (or press `N`) to draw, `Del` to
-   delete, and edit labels/keywords in the side panel. **Download regions** saves a versioned JSON file (with a SHA-256
-   of the PDF) that you can load later to skip analysis. You get a warning if it doesn't match the PDF.
+   delete, and edit labels/keywords in the side panel. Changes save automatically. **Download regions** still exports a
+   versioned JSON file (with a SHA-256 of the PDF) for use elsewhere. You get a warning if it doesn't match the PDF.
 4. **Present**: full-screen slide, continuous speech recognition, automatic zoom.
 
 ## Present controls
@@ -45,7 +80,7 @@ calling the vision model.
 | Key | Action |
 |---|---|
 | `→` / `←` (also PageDown/PageUp, Space) | Next / previous slide (always zooms out) |
-| `Esc` | Zoom out now. Press again (when not zoomed) to leave full-screen, and again to return to the editor |
+| `Esc` | Zoom out now. Press again (when not zoomed) to leave full-screen, and again to return to the editor (this saves the run) |
 | `A` | Toggle automation (bottom-left dot: orange = auto) |
 | `D` | Debug panel |
 | `F` | Toggle full-screen |
@@ -129,16 +164,22 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
   the phrases you actually say is the fix for now.
 - Esc as "zoom out" while full-screen relies on Chrome's Keyboard Lock API. Without it, the browser takes the first Esc
   to exit full-screen (Producer also zooms out when that happens).
-- Analysis results are kept in memory. Download the regions file to keep your edits.
+- Single-user storage: one JSON file on the server, no accounts. Opening a deck re-renders its PDF in the browser
+  (the last 3 decks stay cached for the tab).
+- A run is saved when the presenter closes. If the tab is closed mid-presentation it's sent with `sendBeacon`, which
+  is best-effort.
 - Rendering is at ~1600 px wide JPEG, so very small text will get soft at 3× zoom.
 
 ## Layout
 
 ```
 shared/schema.ts          zod schemas shared by client + server (Region, ProducerFile)
-server/src/               Express: /api/health, /api/analyze (Claude vision, validate, retry)
+server/src/               Express: /api/health, /api/analyze (Claude vision, validate, retry),
+                          library.ts (routes), store.ts (local JSON), supabaseStore.ts (Postgres + Storage)
+supabase/migrations/      the `producer` schema
 scripts/make-sample.ts    pdfkit sample deck + exact regions
 client/src/engine/        pure matching / restraint / zoom logic + tests
 client/src/speech/        SpeechSource interface, Web Speech + scripted implementations
-client/src/components/    Upload, Analyze, Review editor, Present, Debug panel
+client/src/components/    Home, Matter, Deck (Analyze → Review → Present), Run, Debug panel
+client/src/lib/           api client, hash router, deck upload/cache, pdf.js rendering
 ```
