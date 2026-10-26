@@ -216,9 +216,11 @@ export class SupabaseStore implements Library {
     if (!env.DATABASE_URL || !env.SUPABASE_URL || !key) {
       throw new Error("Supabase needs DATABASE_URL, SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY).");
     }
+    // Accept the project URL with or without a path (people often paste the …/rest/v1/ endpoint).
+    const projectUrl = new URL(env.SUPABASE_URL).origin;
     // prepare: false so it also works through Supabase's transaction pooler (port 6543).
     const sql = postgres(env.DATABASE_URL, { prepare: false, max: 5, idle_timeout: 30, onnotice: () => {} });
-    return new SupabaseStore(sql, supabaseBlobs(env.SUPABASE_URL, key), `Supabase (${new URL(env.SUPABASE_URL).host})`);
+    return new SupabaseStore(sql, supabaseBlobs(projectUrl, key), `Supabase (${new URL(projectUrl).host})`);
   }
 
   /** Fails fast at startup if the migration hasn't been applied. */
