@@ -1,0 +1,331 @@
+{
+  "version": 1,
+  "pdfName": "sample.pdf",
+  "pdfHash": "a528e557304bd8d32e7c4d6eb65a0fdc83d25adef76745987000e3cc36aa7d40",
+  "slides": [
+    {
+      "index": 0,
+      "regions": [
+        {
+          "id": "revenue-chart",
+          "label": "Quarterly revenue chart",
+          "description": "Bar chart of revenue for each quarter of FY2026.",
+          "keywords": [
+            "revenue",
+            "quarterly",
+            "each quarter",
+            "bar chart",
+            "trend",
+            "steady climb",
+            "fiscal year"
+          ],
+          "box": {
+            "x": 0.0542,
+            "y": 0.2333,
+            "w": 0.55,
+            "h": 0.6815
+          }
+        },
+        {
+          "id": "q1-bar",
+          "label": "Q1 revenue",
+          "description": "The smallest bar: $4.1M in the first quarter.",
+          "keywords": [
+            "Q1",
+            "first quarter",
+            "start of the year",
+            "4.1 million",
+            "slow start",
+            "January"
+          ],
+          "box": {
+            "x": 0.0729,
+            "y": 0.5116,
+            "w": 0.0958,
+            "h": 0.3921
+          }
+        },
+        {
+          "id": "q4-bar",
+          "label": "Q4 record quarter",
+          "description": "The highlighted Q4 bar at $7.3M, the record quarter.",
+          "keywords": [
+            "Q4",
+            "fourth quarter",
+            "record quarter",
+            "holiday",
+            "7.3 million",
+            "best quarter",
+            "spike"
+          ],
+          "box": {
+            "x": 0.4896,
+            "y": 0.2894,
+            "w": 0.0958,
+            "h": 0.6144
+          }
+        },
+        {
+          "id": "yoy-growth",
+          "label": "Year-over-year growth",
+          "description": "Callout showing revenue grew 38% year over year.",
+          "keywords": [
+            "38 percent",
+            "growth",
+            "year over year",
+            "YoY",
+            "grew",
+            "compared to last year"
+          ],
+          "box": {
+            "x": 0.6458,
+            "y": 0.2407,
+            "w": 0.2958,
+            "h": 0.2963
+          }
+        },
+        {
+          "id": "gross-margin",
+          "label": "Gross margin",
+          "description": "Gross margin KPI at 61%, up from 54%.",
+          "keywords": [
+            "gross margin",
+            "margin",
+            "61 percent",
+            "profitability",
+            "costs",
+            "54 percent",
+            "unit economics"
+          ],
+          "box": {
+            "x": 0.6458,
+            "y": 0.5741,
+            "w": 0.2958,
+            "h": 0.2963
+          }
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "regions": [
+        {
+          "id": "users-chart",
+          "label": "Monthly active users trend",
+          "description": "Line chart of monthly active users across the year.",
+          "keywords": [
+            "active users",
+            "monthly active",
+            "MAU",
+            "user growth",
+            "line chart",
+            "trend",
+            "over the year"
+          ],
+          "box": {
+            "x": 0.0542,
+            "y": 0.2333,
+            "w": 0.6333,
+            "h": 0.6815
+          }
+        },
+        {
+          "id": "churn-dip",
+          "label": "March churn dip",
+          "description": "A dip in users in March caused by churn.",
+          "keywords": [
+            "churn",
+            "dip",
+            "March",
+            "drop",
+            "lost users",
+            "decline",
+            "pricing change"
+          ],
+          "box": {
+            "x": 0.1554,
+            "y": 0.7006,
+            "w": 0.1146,
+            "h": 0.1389
+          }
+        },
+        {
+          "id": "peak-users",
+          "label": "2.4M peak",
+          "description": "Peak of 2.4 million monthly active users in November.",
+          "keywords": [
+            "2.4 million",
+            "peak",
+            "November",
+            "all time high",
+            "record",
+            "high point"
+          ],
+          "box": {
+            "x": 0.528,
+            "y": 0.2802,
+            "w": 0.1042,
+            "h": 0.1111
+          }
+        },
+        {
+          "id": "retention",
+          "label": "90-day retention",
+          "description": "Retention KPI at 87% over 90 days.",
+          "keywords": [
+            "retention",
+            "87 percent",
+            "90 day",
+            "stick around",
+            "come back",
+            "retain"
+          ],
+          "box": {
+            "x": 0.7188,
+            "y": 0.2407,
+            "w": 0.2229,
+            "h": 0.2963
+          }
+        },
+        {
+          "id": "stickiness",
+          "label": "DAU/MAU stickiness",
+          "description": "Daily over monthly active users ratio at 41%.",
+          "keywords": [
+            "stickiness",
+            "DAU",
+            "daily active",
+            "41 percent",
+            "engagement",
+            "every day"
+          ],
+          "box": {
+            "x": 0.7188,
+            "y": 0.5741,
+            "w": 0.2229,
+            "h": 0.2963
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "regions": [
+        {
+          "id": "regional-table",
+          "label": "Revenue by region table",
+          "description": "Table of revenue, growth and margin for four regions.",
+          "keywords": [
+            "region",
+            "regional",
+            "table",
+            "breakdown",
+            "by region",
+            "geography",
+            "markets"
+          ],
+          "box": {
+            "x": 0.0583,
+            "y": 0.2407,
+            "w": 0.5833,
+            "h": 0.5556
+          }
+        },
+        {
+          "id": "north-america",
+          "label": "North America row",
+          "description": "North America: $9.8M revenue, +24% growth, 63% margin.",
+          "keywords": [
+            "North America",
+            "US",
+            "United States",
+            "9.8 million",
+            "largest region",
+            "63 percent"
+          ],
+          "box": {
+            "x": 0.0583,
+            "y": 0.3222,
+            "w": 0.5833,
+            "h": 0.0963
+          }
+        },
+        {
+          "id": "europe",
+          "label": "Europe row",
+          "description": "Europe: $6.1M revenue, +31% growth, 58% margin.",
+          "keywords": [
+            "Europe",
+            "EMEA",
+            "European",
+            "6.1 million",
+            "31 percent",
+            "UK"
+          ],
+          "box": {
+            "x": 0.0583,
+            "y": 0.4185,
+            "w": 0.5833,
+            "h": 0.0963
+          }
+        },
+        {
+          "id": "apac-row",
+          "label": "Asia-Pacific row",
+          "description": "Asia-Pacific: $3.9M revenue, +54% growth, 55% margin.",
+          "keywords": [
+            "Asia Pacific",
+            "APAC",
+            "Asia",
+            "Japan",
+            "3.9 million",
+            "Australia"
+          ],
+          "box": {
+            "x": 0.0583,
+            "y": 0.5148,
+            "w": 0.5833,
+            "h": 0.0963
+          }
+        },
+        {
+          "id": "apac-growth",
+          "label": "APAC growth callout",
+          "description": "Callout: APAC grew 54%, the fastest region.",
+          "keywords": [
+            "54 percent",
+            "fastest growing",
+            "fastest region",
+            "APAC growth",
+            "growth"
+          ],
+          "box": {
+            "x": 0.6771,
+            "y": 0.2407,
+            "w": 0.2646,
+            "h": 0.2963
+          }
+        },
+        {
+          "id": "total-revenue",
+          "label": "Total revenue",
+          "description": "Total revenue of $21.2M across all regions.",
+          "keywords": [
+            "total",
+            "21.2 million",
+            "overall",
+            "combined",
+            "all regions",
+            "in total"
+          ],
+          "box": {
+            "x": 0.6771,
+            "y": 0.5741,
+            "w": 0.2646,
+            "h": 0.2963
+          }
+        }
+      ]
+    }
+  ]
+}
