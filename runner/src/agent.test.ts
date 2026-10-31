@@ -168,6 +168,17 @@ describe("limits", () => {
     expect(d.log).toEqual([]);
   });
 
+  it("stops while waiting for an approval", async () => {
+    const d = fakeDriver();
+    const stop = new AbortController();
+    const { model } = script(reply([call("a", "click_element", { ref: "e2" })]));
+    const beat = runBeat(options(d, model, { approve: () => new Promise(() => {}), signal: stop.signal }));
+    await tick();
+    stop.abort();
+    expect((await beat).outcome).toBe("stopped");
+    expect(d.log).toEqual([]);
+  });
+
   it("asks about a pixel click that lands on a risky element", async () => {
     const d = fakeDriver();
     const asked: string[] = [];
