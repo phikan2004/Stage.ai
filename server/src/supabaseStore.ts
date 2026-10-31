@@ -220,17 +220,36 @@ function regionRows(slides: Slide[], slideCount: number) {
 }
 
 /**
+ * Runs statements one at a time, across concurrent requests too. Behind Supabase's transaction pooler, a query that
+ * overlaps another on the same connection never gets an answer, and neither max_pipeline nor a larger pool prevents it.
+ * Callers use the tag and begin(); inside a transaction, statements must be awaited in turn.
+ */
+function serialize(sql: postgres.Sql): postgres.Sql {
+  let tail: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(run: () => PromiseLike<T>): Promise<T> => {
+    const result = tail.then(run);
+    tail = result.catch(() => {});
+    return result;
+  };
+  const tag = (strings: TemplateStringsArray, ...args: never[]) => enqueue(() => sql(strings, ...args));
+  const begin = (fn: (tx: postgres.TransactionSql) => unknown) => enqueue(() => sql.begin(fn));
+  return Object.assign(tag, { begin }) as unknown as postgres.Sql;
+}
+
+/**
  * Matters, decks, regions and runs in the `producer` Postgres schema (see supabase/migrations), PDFs and thumbnails
  * in Supabase Storage. Connects directly to Postgres, so the schema never has to be exposed through the Data API.
  */
 export class SupabaseStore implements Library {
   readonly where: string;
+  private readonly sql: postgres.Sql;
 
   constructor(
-    private readonly sql: postgres.Sql,
+    private readonly connection: postgres.Sql,
     private readonly blobs: BlobStore,
     where = "Supabase",
   ) {
+    this.sql = serialize(connection);
     this.where = where;
   }
 
@@ -242,11 +261,11 @@ export class SupabaseStore implements Library {
     // Accept the project URL with or without a path (people often paste the …/rest/v1/ endpoint).
     const projectUrl = new URL(env.SUPABASE_URL).origin;
     // prepare: false for Supabase's transaction pooler (port 6543), the only route in from IPv4-only hosts like Vercel.
-    // Serverless instances keep a single connection so that many of them can't exhaust the pool.
+    // One connection per instance so that serverless instances can't exhaust the pool; see serialize() for the queue.
     const sql = postgres(env.DATABASE_URL, {
       ssl: "require",
       prepare: false,
-      max: env.VERCEL ? 1 : 5,
+      max: 1,
       idle_timeout: 30,
       onnotice: () => {},
     });
@@ -260,7 +279,7 @@ export class SupabaseStore implements Library {
   }
 
   async close() {
-    await this.sql.end();
+    await this.connection.end();
   }
 
   /* ---------- reads ---------- */
