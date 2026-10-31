@@ -6,7 +6,7 @@ import { AnalyzeError, analyzeSlide, DEFAULT_MODEL } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
 import { FileStore, type Library } from "./store.ts";
 import { SupabaseStore } from "./supabaseStore.ts";
-import { attachSttRelay } from "./stt.ts";
+import { createSttSession, SttError } from "./stt.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 dotenv.config({ path: join(root, ".env"), quiet: true, override: true });
@@ -19,6 +19,7 @@ async function openLibrary(): Promise<Library> {
     await s.check();
     return s;
   }
+  if (env.VERCEL) throw new Error("Vercel has no persistent disk: set DATABASE_URL, SUPABASE_URL and SUPABASE_SECRET_KEY.");
   const s = new FileStore(env.DATA_DIR || join(root, "data"));
   await s.load();
   return s;
@@ -57,11 +58,26 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
+app.post("/api/stt/session", async (req, res) => {
+  const keyterms: unknown = req.body?.keyterms ?? [];
+  if (!Array.isArray(keyterms) || !keyterms.every((k) => typeof k === "string")) {
+    res.status(400).json({ error: "Body must be { keyterms: string[] }" });
+    return;
+  }
+  try {
+    res.json(await createSttSession(keyterms));
+  } catch (e) {
+    const status = e instanceof SttError ? e.status : 502;
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`stt session failed (${status}): ${message}`);
+    res.status(status).json({ error: message });
+  }
+});
+
 const port = Number(process.env.PORT) || 8787;
-const server = app.listen(port, () => {
+app.listen(port, () => {
   const k = (v?: string) => (v ? "set" : "MISSING");
   console.log(
     `Producer API on http://localhost:${port} (Claude key ${k(process.env.ANTHROPIC_API_KEY)}, Deepgram key ${k(process.env.DEEPGRAM_API_KEY)}, data in ${store.where})`,
   );
 });
-attachSttRelay(server);

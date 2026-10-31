@@ -59,7 +59,7 @@ export async function addDeck(
   const loaded = regionsText ? parseRegionsFile(regionsText, hash, images.length) : null;
 
   onProgress("Saving…");
-  const deck = await api.uploadDeck(matterId, name, bytes, images.length);
+  const deck = await api.uploadDeck(matterId, name, bytes, hash, images.length);
   cacheImages(deck.id, images);
   await Promise.all([
     loaded && api.patchDeck(deck.id, { slides: loaded.file.slides, analyzed: true }),

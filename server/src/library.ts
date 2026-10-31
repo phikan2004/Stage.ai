@@ -1,7 +1,7 @@
 import express, { type Response } from "express";
 import { z } from "zod";
-import { DeckPatchSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
-import type { Library } from "./store.ts";
+import { DeckCreateSchema, DeckPatchSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
+import { UploadMissingError, type Library } from "./store.ts";
 
 const NameBody = z.object({ name: MatterSchema.shape.name });
 
@@ -46,15 +46,31 @@ export function libraryRouter(store: Library) {
 
   /* ---------- decks ---------- */
 
-  // Body is the raw PDF; ?name=deck.pdf&slides=12 (the browser has already rendered it, so it knows the count).
-  r.post("/matters/:id/decks", express.raw({ type: "application/pdf", limit: "200mb" }), async (req, res) => {
-    const name = String(req.query.name ?? "").trim() || "Untitled.pdf";
-    const slides = Number(req.query.slides);
+  // A new deck: get an upload url, PUT the PDF there, then register it with POST /matters/:id/decks.
+  r.post("/matters/:id/decks/upload", async (req, res) => {
+    const upload = await store.prepareUpload(req.params.id);
+    if (!upload) return void notFound(res, "Matter");
+    res.status(201).json(upload);
+  });
+
+  r.post("/matters/:id/decks", async (req, res) => {
+    const body = DeckCreateSchema.safeParse(req.body);
+    if (!body.success) return void badRequest(res, body.error);
+    try {
+      const d = await store.createDeck(req.params.id, body.data);
+      if (!d) return void notFound(res, "Matter");
+      res.status(201).json(d);
+    } catch (e) {
+      if (!(e instanceof UploadMissingError)) throw e;
+      res.status(409).json({ error: e.message });
+    }
+  });
+
+  // Local storage only; with Supabase the upload url points straight at Storage.
+  r.put("/uploads/:deckId", express.raw({ type: "application/pdf", limit: "200mb" }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return void res.status(400).json({ error: "Body must be a PDF" });
-    if (!Number.isInteger(slides) || slides < 1) return void res.status(400).json({ error: "?slides must be a positive integer" });
-    const d = await store.createDeck(req.params.id, name, req.body, slides);
-    if (!d) return void notFound(res, "Matter");
-    res.status(201).json(d);
+    if (!(await store.receiveUpload?.(req.params.deckId, req.body))) return void notFound(res, "Upload");
+    res.status(204).end();
   });
 
   r.get("/decks/:id", async (req, res) => {
@@ -79,7 +95,8 @@ export function libraryRouter(store: Library) {
   r.get("/decks/:id/pdf", async (req, res) => {
     const pdf = await store.pdf(req.params.id);
     if (!pdf) return void notFound(res, "Presentation");
-    res.type("application/pdf").send(pdf);
+    if ("url" in pdf) return void res.redirect(pdf.url);
+    res.type("application/pdf").send(pdf.data);
   });
 
   r.put("/decks/:id/thumb", express.raw({ type: "image/jpeg", limit: "5mb" }), async (req, res) => {

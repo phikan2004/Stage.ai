@@ -46,8 +46,9 @@ interface DeepgramResults {
 }
 
 /**
- * Streams the mic to Deepgram (via the server's /api/stt relay) and emits
- * interim + final transcripts. Reconnects automatically while active.
+ * Streams the mic straight to Deepgram, using a short-lived token from the
+ * server, and emits interim + final transcripts. Reconnects automatically
+ * while active.
  */
 export class DeepgramSpeechSource implements SpeechSource {
   private results = new Emitter<[SpeechResult]>();
@@ -128,6 +129,19 @@ export class DeepgramSpeechSource implements SpeechSource {
     this.status.emit("idle");
   }
 
+  /** Configuration problems won't fix themselves by retrying. */
+  private fail(reason: string): void {
+    this.active = false;
+    this.teardownAudio();
+    this.status.emit("error", reason);
+  }
+
+  private retry(): void {
+    this.status.emit("restarting");
+    this.retryTimer = setTimeout(() => this.connect(), this.retryDelay);
+    this.retryDelay = Math.min(this.retryDelay * 2, 5000);
+  }
+
   private teardownAudio(): void {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
@@ -135,12 +149,27 @@ export class DeepgramSpeechSource implements SpeechSource {
     this.ctx = null;
   }
 
-  private connect(): void {
+  private async connect(): Promise<void> {
     if (!this.active) return;
-    const qs = new URLSearchParams();
-    for (const t of this.keyterms) qs.append("keyterm", t);
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/api/stt?${qs}`);
+    let session: { url: string; token: string };
+    try {
+      const res = await fetch("/api/stt/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ keyterms: this.keyterms }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 503) return this.fail(body.error ?? "Deepgram is not configured");
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      session = body;
+    } catch (e) {
+      this.log.emit(`token request failed: ${e instanceof Error ? e.message : e}`);
+      if (this.active) this.retry();
+      return;
+    }
+    if (!this.active) return; // stopped while we were waiting for the token
+    // Browsers can't set headers on a WebSocket, so the token goes in the subprotocol.
+    const ws = new WebSocket(session.url, ["bearer", session.token]);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
@@ -170,17 +199,7 @@ export class DeepgramSpeechSource implements SpeechSource {
       if (this.ws !== ws) return;
       this.ws = null;
       this.log.emit(`closed ${e.code}${e.reason ? `: ${e.reason}` : ""}`);
-      if (!this.active) return;
-      // Configuration problems won't fix themselves by retrying.
-      if (e.code === 4001 || e.code === 4002) {
-        this.active = false;
-        this.teardownAudio();
-        this.status.emit("error", e.reason || "Deepgram is not configured");
-        return;
-      }
-      this.status.emit("restarting");
-      this.retryTimer = setTimeout(() => this.connect(), this.retryDelay);
-      this.retryDelay = Math.min(this.retryDelay * 2, 5000);
+      if (this.active) this.retry();
     };
   }
 }

@@ -113,6 +113,21 @@ export const DeckRecordSchema = z.object({
 });
 export type DeckRecord = z.infer<typeof DeckRecordSchema>;
 
+/** Registers a PDF that has already been uploaded to the url from `POST /matters/:id/decks/upload`. */
+export const DeckCreateSchema = z.object({
+  deckId: Id,
+  name: z.string().trim().min(1).max(200),
+  pdfHash: z.string().regex(/^[0-9a-f]{64}$/),
+  slideCount: z.number().int().min(1),
+});
+export type DeckCreate = z.infer<typeof DeckCreateSchema>;
+
+/** Where the browser PUTs a new deck's PDF. */
+export interface DeckUpload {
+  deckId: string;
+  url: string;
+}
+
 export const DeckPatchSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   slides: z.array(SlideSchema).optional(),

@@ -61,6 +61,23 @@ file into the Supabase SQL editor. The server refuses to start if Supabase is co
 **Local** (when those variables are empty): `data/db.json` plus `data/decks/<id>/deck.pdf` and `thumb.jpg`. Set
 `DATA_DIR` to put it elsewhere. Local data isn't copied to Supabase when you switch.
 
+PDFs don't pass through the server when using Supabase: the browser uploads to a signed Storage URL, then registers
+the deck, and `GET /api/decks/:id/pdf` redirects to a 5-minute signed download URL. An upload that's never registered
+leaves an unused file in the bucket.
+
+## Deploying to Vercel
+
+`vercel.json` deploys `client/` and `server/` as one project using [Services](https://vercel.com/docs/services) (beta).
+
+1. Import the repo with the **Services** framework preset and Root Directory `./`. Don't use "Import single project".
+2. Add the variables from `.env`. `DATABASE_URL` must be the **Transaction pooler** string (port 6543), and the
+   Deepgram key needs the **Member** role. The server won't start on Vercel without the Supabase variables.
+3. Under **Settings → Deployment Protection**, choose **All Deployments** with **Vercel Authentication**. Producer has
+   no login of its own, so without this anyone with the URL can read and delete your matters and use your API keys.
+
+The server's build command is `npm run typecheck` on purpose: an explicit build command makes Vercel skip its own type
+check, which doesn't work with TypeScript 7. Vercel still bundles the server.
+
 ## Flow
 
 1. **Add a presentation** to a matter: drop a PDF on the **Add a presentation** card. Each page is rendered to an
@@ -140,11 +157,12 @@ All of this is pure TypeScript with no DOM or timers (`client/src/engine/`), dri
 Two engines sit behind the same `SpeechSource` interface (`client/src/speech/`), and you switch between them in the debug panel:
 
 - **Deepgram Nova-3** (default when `DEEPGRAM_API_KEY` is set). The browser captures the mic, downsamples it to 16 kHz
-  PCM in an AudioWorklet, and streams 40 ms frames to the server's `/api/stt` WebSocket relay
-  (`server/src/stt.ts`), which forwards them to Deepgram. The key never leaves the server. The current slide's
-  keywords and labels are sent as `keyterm` boosts, so terms like "Q1" or "APAC" are recognized reliably, and
-  they're updated mid-stream on each slide change. Get a key at console.deepgram.com → API Keys (Member role is
-  enough).
+  PCM in an AudioWorklet, and streams 40 ms frames straight to Deepgram. `POST /api/stt/session`
+  (`server/src/stt.ts`) gives the browser the streaming URL and a 60-second token, which only has to be valid when the
+  socket opens, so the key never leaves the server and long presentations aren't cut off by serverless time limits.
+  The current slide's keywords and labels are sent as `keyterm` boosts, so terms like "Q1" or "APAC" are recognized
+  reliably, and they're updated mid-stream on each slide change. Get a key at console.deepgram.com → API Keys. It
+  needs the **Member** role or higher, because lower roles can't create tokens.
 - **Chrome built-in** (Web Speech API). Free, no key, but slower to settle and no keyword boosting.
 
 `ScriptedSpeechSource` replays a timestamped script and powers the debug panel's simulate box. To add another
@@ -174,7 +192,7 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
 
 ```
 shared/schema.ts          zod schemas shared by client + server (Region, ProducerFile)
-server/src/               Express: /api/health, /api/analyze (Claude vision, validate, retry),
+server/src/               Express: /api/health, /api/analyze (Claude vision, validate, retry), stt.ts (Deepgram tokens),
                           library.ts (routes), store.ts (local JSON), supabaseStore.ts (Postgres + Storage)
 supabase/migrations/      the `producer` schema
 scripts/make-sample.ts    pdfkit sample deck + exact regions
