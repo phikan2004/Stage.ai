@@ -1,17 +1,4 @@
-import { PRODUCER_FILE_VERSION, ProducerFileSchema, normalizeRegions, type ProducerFile, type Slide } from "../../../shared/schema";
-
-export function buildFile(pdfName: string, pdfHash: string, slides: Slide[]): ProducerFile {
-  return { version: PRODUCER_FILE_VERSION, pdfName, pdfHash, slides };
-}
-
-export function downloadFile(file: ProducerFile): void {
-  const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = file.pdfName.replace(/\.pdf$/i, "") + ".regions.json";
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
+import { ProducerFileSchema, normalizeRegions, type ProducerFile, type Slide } from "../../../shared/schema";
 
 export interface LoadedRegions {
   file: ProducerFile;

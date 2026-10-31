@@ -6,11 +6,16 @@ export type SlideStatus =
   | { state: "done"; count: number }
   | { state: "error"; message: string };
 
-export async function analyzeImage(image: string, signal?: AbortSignal): Promise<Region[]> {
+export interface SlideRef {
+  deckId: string;
+  slideIndex: number;
+}
+
+export async function analyzeImage(image: string, ref: SlideRef, signal?: AbortSignal): Promise<Region[]> {
   const res = await fetch("/api/analyze", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ image }),
+    body: JSON.stringify({ image, ...ref }),
     signal,
   });
   const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -21,6 +26,7 @@ export async function analyzeImage(image: string, signal?: AbortSignal): Promise
 /** Analyze slides with limited concurrency, reporting per-slide status as it goes. */
 export async function analyzeAll(
   images: string[],
+  refs: SlideRef[],
   onStatus: (index: number, status: SlideStatus, regions?: Region[]) => void,
   { concurrency = 2, signal }: { concurrency?: number; signal?: AbortSignal } = {},
 ): Promise<void> {
@@ -31,7 +37,7 @@ export async function analyzeAll(
       const i = next++;
       onStatus(i, { state: "running" });
       try {
-        const regions = await analyzeImage(images[i], signal);
+        const regions = await analyzeImage(images[i], refs[i], signal);
         onStatus(i, { state: "done", count: regions.length }, regions);
       } catch (e) {
         if (signal?.aborted) return;

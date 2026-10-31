@@ -39,7 +39,7 @@ export function RunList({ runs, showMatter, empty }: { runs: RunSummary[]; showM
         <span>Presentation</span>
         <span className="num">Length</span>
         <span className="num">Slides</span>
-        <span className="num">Zooms</span>
+        <span className="num">Cues</span>
       </div>
       {runs.map((r) => (
         <a key={r.id} className="run-row" role="row" href={`#/r/${r.id}`}>

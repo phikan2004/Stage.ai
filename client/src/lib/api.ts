@@ -1,8 +1,10 @@
 import type {
   DeckDetail,
   DeckPatch,
+  DeckPlan,
   DeckRecord,
   DeckUpload,
+  RegionDetails,
   HomeData,
   Matter,
   MatterDetail,
@@ -43,6 +45,10 @@ export const api = {
   /** keepalive lets a save started during unload finish (bodies up to 64 KB). */
   patchDeck: (id: string, patch: DeckPatch, keepalive = false) =>
     fetch(`/api/decks/${id}`, send("PATCH", patch, { keepalive })).then(json<DeckRecord>),
+  planDeck: (id: string, images: string[], signal?: AbortSignal) =>
+    fetch(`/api/decks/${id}/plan`, send("POST", { images }, { signal })).then(json<DeckPlan>),
+  describeRegion: (deckId: string, slideIndex: number, label: string, image: string) =>
+    fetch("/api/analyze/region", send("POST", { image, label, deckId, slideIndex })).then(json<RegionDetails>),
   deleteDeck: (id: string) => fetch(`/api/decks/${id}`, send("DELETE")).then(json<void>),
   deckPdf: async (id: string) => {
     const res = await fetch(`/api/decks/${id}/pdf`);

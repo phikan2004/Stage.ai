@@ -17,6 +17,8 @@ import {
   type RunDetail,
   type RunInput,
   type RunSummary,
+  type UsageEntry,
+  type UsageSummary,
 } from "../../shared/schema.ts";
 
 /** createDeck was called before the PDF reached the upload url. */
@@ -55,6 +57,8 @@ export interface Library {
   deleteDeck(id: string): Promise<boolean>;
   addRun(input: RunInput): Promise<Run | null>;
   deleteRun(id: string): Promise<boolean>;
+  recordUsage(entry: UsageEntry): Promise<void>;
+  deckUsage(deckId: string): Promise<UsageSummary>;
 }
 
 interface Db {
@@ -62,6 +66,7 @@ interface Db {
   matters: Matter[];
   decks: DeckRecord[];
   runs: Run[];
+  usage: UsageEntry[];
 }
 
 const newId = () => randomBytes(6).toString("base64url");
@@ -73,7 +78,7 @@ const RECENT_RUNS = 25;
  * configured; writes are serialized and atomic (temp file + rename).
  */
 export class FileStore implements Library {
-  private db: Db = { version: 1, matters: [], decks: [], runs: [] };
+  private db: Db = { version: 1, matters: [], decks: [], runs: [], usage: [] };
   private writing: Promise<void> = Promise.resolve();
   /** ids handed out by prepareUpload; the only ids /api/uploads may write to */
   private pending = new Set<string>();
@@ -272,6 +277,7 @@ export class FileStore implements Library {
     if (patch.name !== undefined) d.name = patch.name;
     if (patch.slides !== undefined) d.slides = patch.slides;
     if (patch.analyzed !== undefined) d.analyzed = patch.analyzed;
+    if (patch.plan !== undefined) d.plan = patch.plan;
     d.updatedAt = Date.now();
     this.touchMatter(d.matterId, d.updatedAt);
     await this.save();
@@ -314,6 +320,25 @@ export class FileStore implements Library {
     this.touchMatter(d.matterId, input.endedAt);
     await this.save();
     return run;
+  }
+
+  async recordUsage(entry: UsageEntry): Promise<void> {
+    this.db.usage.push(entry);
+    await this.save();
+  }
+
+  async deckUsage(deckId: string): Promise<UsageSummary> {
+    const sum: UsageSummary = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+    for (const u of this.db.usage) {
+      if (u.deckId !== deckId) continue;
+      sum.calls++;
+      sum.inputTokens += u.inputTokens;
+      sum.outputTokens += u.outputTokens;
+      sum.cacheReadTokens += u.cacheReadTokens;
+      sum.cacheWriteTokens += u.cacheWriteTokens;
+      sum.costUsd += u.costUsd ?? 0;
+    }
+    return sum;
   }
 
   async deleteRun(id: string): Promise<boolean> {

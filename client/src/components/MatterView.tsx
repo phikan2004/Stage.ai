@@ -144,7 +144,7 @@ function AddDeckCard({ matterId }: { matterId: string }) {
     if (!files || busy) return;
     setError(null);
     const { pdf, regions } = await pickFiles(files);
-    if (!pdf) return setError("Choose a PDF. You can add its .regions.json alongside it to skip analysis.");
+    if (!pdf) return setError("Choose a PDF.");
     try {
       const deckId = await addDeck(matterId, pdf.name, await pdf.arrayBuffer(), regions, setBusy);
       go(`/d/${deckId}`);
@@ -180,14 +180,14 @@ function AddDeckCard({ matterId }: { matterId: string }) {
         <>
           <span className="plus">+</span>
           <span>Add a presentation</span>
-          <span className="hint">Drop a PDF here or click to choose. Add its .regions.json too to skip analysis.</span>
+          <span className="hint">Drop a PDF here or click to choose.</span>
         </>
       )}
       {error && <span className="hint" style={{ color: "var(--err)" }}>{error}</span>}
       <input
         ref={input}
         type="file"
-        accept="application/pdf,.pdf,.json"
+        accept="application/pdf,.pdf"
         multiple
         hidden
         onClick={(e) => e.stopPropagation()}

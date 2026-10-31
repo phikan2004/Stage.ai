@@ -125,8 +125,8 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
       if (a.type === "zoomTo") {
         setZoomId(a.regionId);
         setLastZoomId(a.regionId);
-        const label = regionsRef.current.find((r) => r.id === a.regionId)?.label ?? a.regionId;
-        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label });
+        const region = regionsRef.current.find((r) => r.id === a.regionId);
+        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue });
       } else if (a.type === "zoomOut") {
         setZoomId(null);
       }
@@ -335,8 +335,11 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     return () => clearTimeout(id);
   }, []);
 
-  const zoomRegion = regions.find((r) => r.id === zoomId);
-  const spotRegion = regions.find((r) => r.id === (zoomId ?? lastZoomId));
+  const activeRegion = regions.find((r) => r.id === zoomId);
+  const lastRegion = regions.find((r) => r.id === (zoomId ?? lastZoomId));
+  const zoomRegion = activeRegion?.cue === "outline" ? undefined : activeRegion;
+  const spotRegion = lastRegion?.cue === "outline" ? undefined : lastRegion;
+  const outlineRegion = lastRegion?.cue === "outline" ? lastRegion : undefined;
   const transform = zoomRegion ? computeZoom(zoomRegion.box, config.zoomPadding, config.maxZoom) : IDENTITY;
   const ease = `${config.transitionMs}ms cubic-bezier(.22,.61,.36,1)`;
   const pad = config.zoomPadding * 0.5;
@@ -367,6 +370,19 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
                 height: `${(spotRegion.box.h + 2 * pad) * 100}%`,
                 boxShadow: `0 0 0 200vmax rgba(20, 20, 22, ${config.dimOpacity})`,
                 opacity: zoomRegion ? 1 : 0,
+                transition: `opacity ${ease}`,
+              }}
+            />
+          )}
+          {outlineRegion && (
+            <div
+              className="cue-outline"
+              style={{
+                left: `${(outlineRegion.box.x - pad) * 100}%`,
+                top: `${(outlineRegion.box.y - pad) * 100}%`,
+                width: `${(outlineRegion.box.w + 2 * pad) * 100}%`,
+                height: `${(outlineRegion.box.h + 2 * pad) * 100}%`,
+                opacity: activeRegion ? 1 : 0,
                 transition: `opacity ${ease}`,
               }}
             />

@@ -6,7 +6,7 @@ import { go } from "../lib/router";
 import { Loading, TopBar } from "./Chrome";
 
 type Item =
-  | { kind: "zoom"; t: number; label: string }
+  | { kind: "zoom"; t: number; label: string; outline: boolean }
   | { kind: "command"; t: number; text: string }
   | { kind: "said"; t: number; text: string; simulated: boolean };
 
@@ -28,7 +28,7 @@ function segments(events: RunEvent[], total: number): Segment[] {
       out.push(seg);
       if (e.type === "slide") continue;
     }
-    if (e.type === "zoom") seg.items.push({ kind: "zoom", t: e.t, label: e.label });
+    if (e.type === "zoom") seg.items.push({ kind: "zoom", t: e.t, label: e.label, outline: e.cue === "outline" });
     else if (e.type === "command") seg.items.push({ kind: "command", t: e.t, text: e.text });
     else if (e.type === "heard") {
       const prev = seg.items.at(-1);
@@ -99,7 +99,7 @@ export default function RunView({ id }: { id: string }) {
             <div className="stats">
               <Stat label="Length" value={duration(run.stats.durationMs)} />
               <Stat label="Slides shown" value={`${run.stats.slidesVisited}`} sub={`of ${run.slideCount}`} />
-              <Stat label="Zooms" value={`${run.stats.zooms}`} />
+              <Stat label="Cues" value={`${run.stats.zooms}`} />
               <Stat label="Voice commands" value={`${run.stats.commands}`} />
               <Stat label="Words heard" value={run.stats.words.toLocaleString()} />
             </div>
@@ -135,7 +135,7 @@ export default function RunView({ id }: { id: string }) {
                               <span className="tl-t">{clock(it.t)}</span>
                               {it.kind === "zoom" ? (
                                 <>
-                                  Zoomed to <b>{it.label}</b>
+                                  {it.outline ? "Outlined" : "Zoomed to"} <b>{it.label}</b>
                                 </>
                               ) : (
                                 <>Voice command “{it.text}”</>
