@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { RunSummary } from "../../../shared/schema";
 import { api } from "../lib/api";
-import { dateTime, duration, relTime } from "../lib/format";
 import { go } from "../lib/router";
 
 export interface Crumb {
@@ -27,35 +25,6 @@ export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?:
       <div className="spacer" />
       {children}
     </header>
-  );
-}
-
-export function RunList({ runs, showMatter, empty }: { runs: RunSummary[]; showMatter?: boolean; empty: ReactNode }) {
-  if (runs.length === 0) return <div className="empty-row">{empty}</div>;
-  return (
-    <div className="runs" role="table">
-      <div className="run-row head" role="row">
-        <span>When</span>
-        <span>Presentation</span>
-        <span className="num">Length</span>
-        <span className="num">Slides</span>
-        <span className="num">Zooms</span>
-      </div>
-      {runs.map((r) => (
-        <a key={r.id} className="run-row" role="row" href={`#/r/${r.id}`}>
-          <span title={dateTime(r.startedAt)}>{relTime(r.startedAt)}</span>
-          <span className="run-name">
-            {r.deckName.replace(/\.pdf$/i, "")}
-            {showMatter && <span className="hint"> · {r.matterName}</span>}
-          </span>
-          <span className="num">{duration(r.stats.durationMs)}</span>
-          <span className="num">
-            {r.stats.slidesVisited}/{r.slideCount}
-          </span>
-          <span className="num">{r.stats.zooms}</span>
-        </a>
-      ))}
-    </div>
   );
 }
 

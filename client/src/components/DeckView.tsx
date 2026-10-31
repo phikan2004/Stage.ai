@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckDetail, Region, RunInput, Slide } from "../../../shared/schema";
 import { api } from "../lib/api";
-import { cacheImages, cachedImages, takeNotices, type Deck } from "../lib/deck";
+import { cacheImages, cachedImages, renderDeck, takeNotices, type Deck } from "../lib/deck";
 import { buildFile, downloadFile, parseRegionsFile } from "../lib/fileIO";
-import { duration } from "../lib/format";
-import { renderPdf } from "../lib/pdf";
+import { deckTitle } from "../lib/format";
 import AnalyzeView from "./AnalyzeView";
 import { Loading, TopBar } from "./Chrome";
 import PresentView from "./PresentView";
@@ -26,7 +25,6 @@ export default function DeckView({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
-  const [lastRun, setLastRun] = useState<{ id: string; ms: number } | null>(null);
   /** last slides the server has; pending = waiting to be sent */
   const saved = useRef<Slide[] | null>(null);
   const pending = useRef<Slide[] | null>(null);
@@ -42,9 +40,9 @@ export default function DeckView({ id }: { id: string }) {
         setDetail(d);
         let images = cachedImages(id);
         if (!images) {
-          setLoading("Loading PDF…");
-          const bytes = await api.deckPdf(id);
-          images = await renderPdf(bytes, (done, total) => alive && setLoading(`Rendering slide ${done} of ${total}…`));
+          setLoading("Loading presentation…");
+          const bytes = await api.deckFile(id);
+          images = await renderDeck(bytes, (done, total) => alive && setLoading(`Rendering slide ${done} of ${total}…`));
           cacheImages(id, images);
         }
         if (!alive) return;
@@ -129,24 +127,19 @@ export default function DeckView({ id }: { id: string }) {
   const present = (from: number) => {
     setStartSlide(from);
     setStage("present");
-    setLastRun(null);
     // Must be called inside the click handler's user gesture.
     document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
   const onRunEnd = useCallback(
     (run: Omit<RunInput, "deckId">, unloading: boolean) => {
-      const ms = run.endedAt - run.startedAt;
-      if (ms < MIN_RUN_MS) return;
+      if (run.endedAt - run.startedAt < MIN_RUN_MS) return;
       const input = { ...run, deckId: id };
       if (unloading) {
         api.beaconRun(input);
         return;
       }
-      api
-        .saveRun(input)
-        .then(({ id: runId }) => setLastRun({ id: runId, ms }))
-        .catch((e) => setError(`Couldn't save this run: ${e instanceof Error ? e.message : e}`));
+      api.saveRun(input).catch((e) => console.error("Couldn't save this run", e));
     },
     [id],
   );
@@ -169,17 +162,12 @@ export default function DeckView({ id }: { id: string }) {
   const crumbs = [
     { label: "Matters", to: "/" },
     { label: detail?.matterName || "…", to: detail ? `/m/${detail.matterId}` : undefined },
-    { label: detail?.name.replace(/\.pdf$/i, "") ?? "…" },
+    { label: detail ? deckTitle(detail.name) : "…" },
   ];
 
   return (
     <div className="deck-page">
       <TopBar crumbs={crumbs}>
-        {lastRun && (
-          <a className="run-pill" href={`#/r/${lastRun.id}`}>
-            Run saved · {duration(lastRun.ms)} · View →
-          </a>
-        )}
         {deck && (
           <>
             <span className={`save-state ${saveState}`}>

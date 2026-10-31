@@ -6,6 +6,7 @@ import {
   summarizeRun,
   type DeckCreate,
   type DeckDetail,
+  type DeckFormat,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
@@ -21,9 +22,9 @@ import {
   type RunSummary,
   type Slide,
 } from "../../shared/schema.ts";
-import { UploadMissingError, type Library, type PdfSource } from "./store.ts";
+import { UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
 
-/** Where PDFs and thumbnails go. Supabase Storage in production; swappable for tests. */
+/** Where deck files and thumbnails go. Supabase Storage in production; swappable for tests. */
 export interface BlobStore {
   put(path: string, data: Buffer, contentType: string): Promise<void>;
   get(path: string): Promise<Buffer | null>;
@@ -77,7 +78,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (id: string) => UUID.test(id);
 const ms = (d: Date | null) => (d ? d.getTime() : null);
 const RECENT_RUNS = 25;
-const pdfPathFor = (deckId: string) => `${deckId}/deck.pdf`;
+const deckPathFor = (deckId: string, format: DeckFormat) => `${deckId}/deck.${format}`;
 
 /* Row shapes as they come back from Postgres (postgres.js: timestamptz → Date). */
 interface MatterRow {
@@ -237,7 +238,7 @@ function serialize(sql: postgres.Sql): postgres.Sql {
 }
 
 /**
- * Matters, decks, regions and runs in the `producer` Postgres schema (see supabase/migrations), PDFs and thumbnails
+ * Matters, decks, regions and runs in the `producer` Postgres schema (see supabase/migrations), deck files and thumbnails
  * in Supabase Storage. Connects directly to Postgres, so the schema never has to be exposed through the Data API.
  */
 export class SupabaseStore implements Library {
@@ -346,7 +347,7 @@ export class SupabaseStore implements Library {
     return { ...toRunSummary(r), events: events.map(toEvent), deckExists: true };
   }
 
-  async pdf(deckId: string): Promise<PdfSource | null> {
+  async deckFile(deckId: string): Promise<DeckFileSource | null> {
     if (!isId(deckId)) return null;
     const [d] = await this.sql<{ pdf_path: string }[]>`select pdf_path from producer.decks where id = ${deckId}`;
     return d ? { url: await this.blobs.downloadUrl(d.pdf_path) } : null;
@@ -381,19 +382,19 @@ export class SupabaseStore implements Library {
     return true;
   }
 
-  async prepareUpload(matterId: string): Promise<DeckUpload | null> {
+  async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
     if (!isId(matterId)) return null;
     const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
     if (!exists) return null;
     const deckId = randomUUID();
-    return { deckId, url: await this.blobs.uploadUrl(pdfPathFor(deckId)) };
+    return { deckId, url: await this.blobs.uploadUrl(deckPathFor(deckId, format)) };
   }
 
-  async createDeck(matterId: string, { deckId, name, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
+  async createDeck(matterId: string, { deckId, name, format, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
     if (!isId(matterId)) return null;
     const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
     if (!exists) return null;
-    const pdfPath = pdfPathFor(deckId);
+    const pdfPath = deckPathFor(deckId, format);
     if (!isId(deckId) || !(await this.blobs.exists(pdfPath))) throw new UploadMissingError();
     try {
       const [d] = await this.sql<DeckRow[]>`
