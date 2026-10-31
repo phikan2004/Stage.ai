@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckSummary, MatterDetail } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { addDeck, pickFiles } from "../lib/deck";
-import { dateTime, plural, relTime } from "../lib/format";
+import { dateTime, deckTitle, plural } from "../lib/format";
 import { go } from "../lib/router";
-import { Loading, NameDialog, RunList, TopBar } from "./Chrome";
+import { Loading, NameDialog, TopBar } from "./Chrome";
 
 export default function MatterView({ id }: { id: string }) {
   const [data, setData] = useState<MatterDetail | null>(null);
@@ -75,14 +75,6 @@ export default function MatterView({ id }: { id: string }) {
                 ))}
               </div>
             </section>
-
-            <section className="section">
-              <div className="section-head">
-                <h2 className="display">Run history</h2>
-                <span className="hint">Every time a presentation in this matter was presented</span>
-              </div>
-              <RunList runs={data.runs} empty="No runs yet. Open a presentation and press Present." />
-            </section>
           </>
         )}
       </main>
@@ -122,12 +114,9 @@ function DeckCard({ deck: d, onDelete }: { deck: DeckSummary; onDelete: () => vo
         </button>
       </div>
       <div className="card-body">
-        <div className="card-title">{d.name.replace(/\.pdf$/i, "")}</div>
+        <div className="card-title">{deckTitle(d.name)}</div>
         <div className="hint">
           {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")}
-        </div>
-        <div className="hint">
-          {d.lastRunAt ? `Presented ${plural(d.runCount, "time")} · last ${relTime(d.lastRunAt).toLowerCase()}` : "Not presented yet"}
         </div>
       </div>
     </a>
@@ -140,13 +129,17 @@ function AddDeckCard({ matterId }: { matterId: string }) {
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const take = async (files: FileList | null) => {
-    if (!files || busy) return;
+  const take = async (list: FileList | null) => {
+    if (!list || busy) return;
     setError(null);
-    const { pdf, regions } = await pickFiles(files);
-    if (!pdf) return setError("Choose a PDF.");
+    const files = Array.from(list); // the input clears its live FileList once the handler yields
+    const { deck, regions } = await pickFiles(files);
+    if (!deck) {
+      const legacy = files.some((f) => f.name.toLowerCase().endsWith(".ppt"));
+      return setError(legacy ? "Older .ppt files aren't supported. In PowerPoint, use Save As to make a .pptx." : "Choose a PowerPoint (.pptx) or PDF file.");
+    }
     try {
-      const deckId = await addDeck(matterId, pdf.name, await pdf.arrayBuffer(), regions, setBusy);
+      const deckId = await addDeck(matterId, deck.name, await deck.arrayBuffer(), regions, setBusy);
       go(`/d/${deckId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -180,14 +173,14 @@ function AddDeckCard({ matterId }: { matterId: string }) {
         <>
           <span className="plus">+</span>
           <span>Add a presentation</span>
-          <span className="hint">Drop a PDF here or click to choose.</span>
+          <span className="hint">Drop a PowerPoint or PDF here, or click to choose.</span>
         </>
       )}
       {error && <span className="hint" style={{ color: "var(--err)" }}>{error}</span>}
       <input
         ref={input}
         type="file"
-        accept="application/pdf,.pdf"
+        accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/pdf,.pdf"
         multiple
         hidden
         onClick={(e) => e.stopPropagation()}

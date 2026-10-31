@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RunDetail, RunEvent } from "../../../shared/schema";
 import { api } from "../lib/api";
-import { clock, dateTime, duration } from "../lib/format";
+import { clock, dateTime, deckTitle, duration } from "../lib/format";
 import { go } from "../lib/router";
 import { Loading, TopBar } from "./Chrome";
 
@@ -61,7 +61,7 @@ export default function RunView({ id }: { id: string }) {
     go(`/m/${run.matterId}`);
   };
 
-  const deckLabel = run?.deckName.replace(/\.pdf$/i, "") ?? "…";
+  const deckLabel = run ? deckTitle(run.deckName) : "…";
   const crumbs = [
     { label: "Matters", to: "/" },
     { label: run?.matterName || "…", to: run ? `/m/${run.matterId}` : undefined },

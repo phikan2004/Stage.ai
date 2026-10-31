@@ -29,13 +29,43 @@ whole flow without calling the vision model.
 
 ## Matters, presentations and runs
 
-- **Home** (`#/`) lists your matters, most recently active first, and a **Recent runs** feed across all of them.
-- A **matter** is one project. It holds its presentations (PDF decks) and that matter's run history. Click **New
+- **Home** (`#/`) lists your matters, most recently active first.
+- A **matter** is one project. It holds its presentations (PowerPoint or PDF). Click **New
   matter** to start one.
 - A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
-  records the slides shown, every zoom, every voice command and what was heard. Its page shows the stats and a
-  slide-by-slide timeline.
+  records the slides shown, every zoom, every voice command and what was heard. Run history isn't linked from the
+  app right now, but runs are still saved and each one's page still works at `#/r/<id>`.
 - Region edits autosave as you work. The top bar shows Saving…/Saved.
+
+## Stage (in progress)
+
+Stage is an AI operator for live software demos: you talk, and it performs the demo on your Mac. It always acts live
+from the real screen, and nothing is replayed. While you're still talking, it decides its next actions and holds them
+until you reach that moment, then checks the screen hasn't changed and runs them. If it has changed, it decides again.
+
+So far this is the runner, a local process in `runner/` with a Swift helper for screen and input. The console and
+teaching flows aren't built yet. It runs on your Mac because a web page can't control other apps and Vercel can't reach
+your computer.
+
+| Command | What it does |
+|---|---|
+| `npm run stage -- --setup` | Asks macOS for Accessibility and Screen Recording, and lists your displays |
+| `npm run stage -- --look` | Prints what it sees on the stage display |
+| `npm run stage -- --try textedit` | Performs one action with no AI (`browser`, `terminal` or `textedit`) |
+| `npm run stage -- --goal "…" --allow TextEdit` | Runs the live agent on one goal |
+| `npm run stage -- --goal "…" --target browser --url http://localhost:5173` | The same, in Chrome |
+
+Enter or a clicker's PageDown releases held actions. Double Esc stops everything, whichever app is in front. Add
+`--no-hold` or `--no-fast` to compare timings.
+
+**Before using this for real, create a separate macOS user account** with only demo logins and data. An AI with mouse
+and keyboard control can reach anything the logged-in user can. Permissions belong to the app you start the runner
+from, such as Terminal. Grant them in System Settings → Privacy & Security, then restart that app.
+
+Safety limits: the agent only acts in the apps and web origins you allow, on the stage display. It asks you before
+typing terminal commands you haven't taught it, and before clicking things like Delete, Send or Pay. It treats on-screen
+text as data, never as instructions, and has a limit on actions and time per beat. It needs two displays for desktop
+control.
 
 ## Storage: Supabase or local
 
@@ -45,24 +75,24 @@ dedicated `producer` Postgres schema, defined in `supabase/migrations/`:
 | Table | Holds |
 |---|---|
 | `producer.matters` | Projects |
-| `producer.decks` | Presentations: name, PDF hash, slide count, analyzed flag, Storage paths |
+| `producer.decks` | Presentations: name, file hash, slide count, analyzed flag, Storage paths |
 | `producer.regions` | One row per region: slide, order, label, description, `keywords text[]`, box (CHECKed to stay on the slide) |
 | `producer.runs` | One row per presentation run, with stored stats |
 | `producer.run_events` | The run timeline: slide changes, zooms, voice commands, what was heard |
 
 Deleting a matter cascades to its decks, regions, runs and events. Triggers keep `updated_at` and each matter's
-last-activity time current. The views `matter_summaries`, `deck_summaries` and `run_summaries` feed the lists. PDFs and
+last-activity time current. The views `matter_summaries`, `deck_summaries` and `run_summaries` feed the lists. Deck files and
 thumbnails go to the private Storage bucket `producer-decks`. The server talks to Postgres directly, so the schema isn't
 exposed through the Data API: RLS is on with no policies, and the `anon`/`authenticated` roles have no grants.
 
 The GitHub integration applies the migration when it's pushed to the production branch. You can also paste the SQL
 file into the Supabase SQL editor. The server refuses to start if Supabase is configured but the schema is missing.
 
-**Local** (when those variables are empty): `data/db.json` plus `data/decks/<id>/deck.pdf` and `thumb.jpg`. Set
+**Local** (when those variables are empty): `data/db.json` plus `data/decks/<id>/deck.pptx` or `deck.pdf`, and `thumb.jpg`. Set
 `DATA_DIR` to put it elsewhere. Local data isn't copied to Supabase when you switch.
 
-PDFs don't pass through the server when using Supabase: the browser uploads to a signed Storage URL, then registers
-the deck, and `GET /api/decks/:id/pdf` redirects to a 5-minute signed download URL. An upload that's never registered
+Deck files don't pass through the server when using Supabase: the browser uploads to a signed Storage URL, then
+registers the deck, and `GET /api/decks/:id/file` redirects to a 5-minute signed download URL. An upload that's never registered
 leaves an unused file in the bucket.
 
 ## Deploying to Vercel
@@ -80,8 +110,11 @@ check, which doesn't work with TypeScript 7. Vercel still bundles the server.
 
 ## Flow
 
-1. **Add a presentation** to a matter: drop a PDF on the **Add a presentation** card. Each page is rendered to an
-   image in the browser with pdf.js, and the PDF is stored in the matter.
+1. **Add a presentation** to a matter: drop a PowerPoint (`.pptx`) or PDF on the **Add a presentation** card. The original
+   file is stored in the matter, and each slide is rendered to an image in the browser, with `@silurus/ooxml` for
+   PowerPoint and pdf.js for PDF. Slides hidden in PowerPoint are left out and animations show their final state.
+   Fonts that aren't embedded or available fall back to substitutes (Carlito for Calibri, from Google Fonts). Older
+   `.ppt` files and password-protected decks aren't supported.
 2. **Add cues** in Review: drag on a slide to mark something, then give it a label and a cue type in the popup. A box
    you don't name disappears. Drag boxes to move them, pull corners to resize, and press `Del` to remove one. Or press
    **Suggest cues** to have Claude read the whole deck and propose them. Changes save automatically.
@@ -213,7 +246,7 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
   the phrases you actually say is the fix for now.
 - Esc as "zoom out" while full-screen relies on Chrome's Keyboard Lock API. Without it, the browser takes the first Esc
   to exit full-screen (Producer also zooms out when that happens).
-- Single-user storage: one JSON file on the server, no accounts. Opening a deck re-renders its PDF in the browser
+- Single-user storage: one JSON file on the server, no accounts. Opening a deck re-renders its file in the browser
   (the last 3 decks stay cached for the tab).
 - A run is saved when the presenter closes. If the tab is closed mid-presentation it's sent with `sendBeacon`, which
   is best-effort.
@@ -230,5 +263,5 @@ scripts/make-sample.ts    pdfkit sample deck + exact regions
 client/src/engine/        pure matching / restraint / zoom logic + tests
 client/src/speech/        SpeechSource interface, Web Speech + scripted implementations
 client/src/components/    Home, Matter, Deck (Review → Present), Run, Debug panel
-client/src/lib/           api client, hash router, deck upload/cache, pdf.js rendering
+client/src/lib/           api client, hash router, deck upload/cache, PDF and PowerPoint rendering
 ```

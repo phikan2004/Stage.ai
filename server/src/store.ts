@@ -5,6 +5,7 @@ import {
   summarizeRun,
   type DeckCreate,
   type DeckDetail,
+  type DeckFormat,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
@@ -21,19 +22,19 @@ import {
   type UsageSummary,
 } from "../../shared/schema.ts";
 
-/** createDeck was called before the PDF reached the upload url. */
+/** createDeck was called before the file reached the upload url. */
 export class UploadMissingError extends Error {
   constructor() {
-    super("The PDF upload didn't arrive. Try adding the presentation again.");
+    super("The upload didn't arrive. Try adding the presentation again.");
   }
 }
 
-/** A PDF is either served from here (local) or fetched straight from storage via a temporary url. */
-export type PdfSource = { url: string } | { data: Buffer };
+/** A deck's file is either served from here (local) or fetched straight from storage via a temporary url. */
+export type DeckFileSource = { url: string } | { data: Buffer };
 
 /**
  * Storage behind the /api routes. FileStore (local JSON) or SupabaseStore (Postgres + Storage).
- * PDFs move directly between the browser and storage: serverless hosts cap requests at 4.5 MB.
+ * Deck files move directly between the browser and storage: serverless hosts cap requests at 4.5 MB.
  */
 export interface Library {
   /** human-readable location, for the startup log */
@@ -42,15 +43,15 @@ export interface Library {
   matter(id: string): Promise<MatterDetail | null>;
   deck(id: string): Promise<DeckDetail | null>;
   run(id: string): Promise<RunDetail | null>;
-  pdf(deckId: string): Promise<PdfSource | null>;
+  deckFile(deckId: string): Promise<DeckFileSource | null>;
   thumb(deckId: string): Promise<Buffer | null>;
   createMatter(name: string): Promise<Matter>;
   renameMatter(id: string, name: string): Promise<Matter | null>;
   deleteMatter(id: string): Promise<boolean>;
-  /** Reserves a deck id and says where to send its PDF; null if the matter doesn't exist. */
-  prepareUpload(matterId: string): Promise<DeckUpload | null>;
+  /** Reserves a deck id and says where to send its file; null if the matter doesn't exist. */
+  prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null>;
   /** Only stores that upload through /api/uploads implement this. */
-  receiveUpload?(deckId: string, pdf: Buffer): Promise<boolean>;
+  receiveUpload?(deckId: string, file: Buffer): Promise<boolean>;
   createDeck(matterId: string, deck: DeckCreate): Promise<DeckRecord | null>;
   patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null>;
   setThumb(id: string, jpeg: Buffer): Promise<boolean>;
@@ -74,14 +75,14 @@ const byRecent = <T extends { updatedAt: number }>(a: T, b: T) => b.updatedAt - 
 const RECENT_RUNS = 25;
 
 /**
- * Everything lives in one JSON file plus a folder per deck (PDF + thumbnail). The fallback when Supabase isn't
+ * Everything lives in one JSON file plus a folder per deck (file + thumbnail). The fallback when Supabase isn't
  * configured; writes are serialized and atomic (temp file + rename).
  */
 export class FileStore implements Library {
   private db: Db = { version: 1, matters: [], decks: [], runs: [], usage: [] };
   private writing: Promise<void> = Promise.resolve();
   /** ids handed out by prepareUpload; the only ids /api/uploads may write to */
-  private pending = new Set<string>();
+  private pending = new Map<string, DeckFormat>();
 
   constructor(readonly dir: string) {}
 
@@ -95,8 +96,8 @@ export class FileStore implements Library {
   private deckDir(id: string) {
     return join(this.dir, "decks", id);
   }
-  private pdfPath(id: string) {
-    return join(this.deckDir(id), "deck.pdf");
+  private filePath(id: string, format: DeckFormat) {
+    return join(this.deckDir(id), `deck.${format}`);
   }
   private thumbPath(id: string) {
     return join(this.deckDir(id), "thumb.jpg");
@@ -194,9 +195,10 @@ export class FileStore implements Library {
     return { ...this.runSummary(r), events: r.events, deckExists: this.db.decks.some((d) => d.id === r.deckId) };
   }
 
-  async pdf(id: string): Promise<PdfSource | null> {
+  async deckFile(id: string): Promise<DeckFileSource | null> {
     if (!this.db.decks.some((d) => d.id === id)) return null;
-    return { data: await readFile(this.pdfPath(id)) };
+    const format = (await stat(this.filePath(id, "pptx")).catch(() => null)) ? "pptx" : "pdf";
+    return { data: await readFile(this.filePath(id, format)) };
   }
 
   async thumb(id: string): Promise<Buffer | null> {
@@ -234,23 +236,24 @@ export class FileStore implements Library {
     return true;
   }
 
-  async prepareUpload(matterId: string): Promise<DeckUpload | null> {
+  async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
     if (!this.db.matters.some((m) => m.id === matterId)) return null;
     const deckId = newId();
-    this.pending.add(deckId);
+    this.pending.set(deckId, format);
     return { deckId, url: `/api/uploads/${deckId}` };
   }
 
-  async receiveUpload(deckId: string, pdf: Buffer): Promise<boolean> {
-    if (!this.pending.has(deckId)) return false;
+  async receiveUpload(deckId: string, file: Buffer): Promise<boolean> {
+    const format = this.pending.get(deckId);
+    if (!format) return false;
     await mkdir(this.deckDir(deckId), { recursive: true });
-    await writeFile(this.pdfPath(deckId), pdf);
+    await writeFile(this.filePath(deckId, format), file);
     return true;
   }
 
-  async createDeck(matterId: string, { deckId, name, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
+  async createDeck(matterId: string, { deckId, name, format, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
     if (!this.db.matters.some((m) => m.id === matterId)) return null;
-    if (!this.pending.has(deckId) || !(await stat(this.pdfPath(deckId)).catch(() => null))) throw new UploadMissingError();
+    if (this.pending.get(deckId) !== format || !(await stat(this.filePath(deckId, format)).catch(() => null))) throw new UploadMissingError();
     this.pending.delete(deckId);
     const now = Date.now();
     const d: DeckRecord = {

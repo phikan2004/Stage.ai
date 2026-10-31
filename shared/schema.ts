@@ -166,16 +166,24 @@ export const DeckRecordSchema = z.object({
 });
 export type DeckRecord = z.infer<typeof DeckRecordSchema>;
 
-/** Registers a PDF that has already been uploaded to the url from `POST /matters/:id/decks/upload`. */
+export const DeckFormatSchema = z.enum(["pdf", "pptx"]);
+export type DeckFormat = z.infer<typeof DeckFormatSchema>;
+
+/** Asks where to send a new deck's file. */
+export const DeckUploadRequestSchema = z.object({ format: DeckFormatSchema });
+
+/** Registers a file that has already been uploaded to the url from `POST /matters/:id/decks/upload`. */
 export const DeckCreateSchema = z.object({
   deckId: Id,
   name: z.string().trim().min(1).max(200),
+  format: DeckFormatSchema,
+  /** SHA-256 of the deck's file; the name predates PowerPoint support */
   pdfHash: z.string().regex(/^[0-9a-f]{64}$/),
   slideCount: z.number().int().min(1),
 });
 export type DeckCreate = z.infer<typeof DeckCreateSchema>;
 
-/** Where the browser PUTs a new deck's PDF. */
+/** Where the browser PUTs a new deck's file. */
 export interface DeckUpload {
   deckId: string;
   url: string;

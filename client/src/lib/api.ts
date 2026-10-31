@@ -1,5 +1,6 @@
 import type {
   DeckDetail,
+  DeckFormat,
   DeckPatch,
   DeckPlan,
   DeckRecord,
@@ -26,6 +27,11 @@ const send = (method: string, body?: unknown, init?: RequestInit): RequestInit =
   ...init,
 });
 
+const MIME: Record<DeckFormat, string> = {
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
 export const api = {
   home: () => fetch("/api/home").then(json<HomeData>),
 
@@ -34,12 +40,12 @@ export const api = {
   renameMatter: (id: string, name: string) => fetch(`/api/matters/${id}`, send("PATCH", { name })).then(json<Matter>),
   deleteMatter: (id: string) => fetch(`/api/matters/${id}`, send("DELETE")).then(json<void>),
 
-  /** The PDF goes straight to storage, then the deck is registered with the server. */
-  uploadDeck: async (matterId: string, name: string, pdf: ArrayBuffer, pdfHash: string, slideCount: number) => {
-    const { deckId, url } = await fetch(`/api/matters/${matterId}/decks/upload`, send("POST", {})).then(json<DeckUpload>);
-    const put = await fetch(url, { method: "PUT", headers: { "content-type": "application/pdf" }, body: pdf });
-    if (!put.ok) throw new Error(`Couldn't upload the PDF (HTTP ${put.status})`);
-    return fetch(`/api/matters/${matterId}/decks`, send("POST", { deckId, name, pdfHash, slideCount })).then(json<DeckRecord>);
+  /** The file goes straight to storage, then the deck is registered with the server. */
+  uploadDeck: async (matterId: string, name: string, format: DeckFormat, bytes: ArrayBuffer, pdfHash: string, slideCount: number) => {
+    const { deckId, url } = await fetch(`/api/matters/${matterId}/decks/upload`, send("POST", { format })).then(json<DeckUpload>);
+    const put = await fetch(url, { method: "PUT", headers: { "content-type": MIME[format] }, body: bytes });
+    if (!put.ok) throw new Error(`Couldn't upload the presentation (HTTP ${put.status})`);
+    return fetch(`/api/matters/${matterId}/decks`, send("POST", { deckId, name, format, pdfHash, slideCount })).then(json<DeckRecord>);
   },
   deck: (id: string) => fetch(`/api/decks/${id}`).then(json<DeckDetail>),
   /** keepalive lets a save started during unload finish (bodies up to 64 KB). */
@@ -50,9 +56,9 @@ export const api = {
   describeRegion: (deckId: string, slideIndex: number, label: string, image: string) =>
     fetch("/api/analyze/region", send("POST", { image, label, deckId, slideIndex })).then(json<RegionDetails>),
   deleteDeck: (id: string) => fetch(`/api/decks/${id}`, send("DELETE")).then(json<void>),
-  deckPdf: async (id: string) => {
-    const res = await fetch(`/api/decks/${id}/pdf`);
-    if (!res.ok) throw new Error(`Couldn't load the PDF (HTTP ${res.status})`);
+  deckFile: async (id: string) => {
+    const res = await fetch(`/api/decks/${id}/file`);
+    if (!res.ok) throw new Error(`Couldn't load the presentation (HTTP ${res.status})`);
     return res.arrayBuffer();
   },
   putThumb: (id: string, jpeg: Blob) =>

@@ -5,13 +5,15 @@
   "type": "module",
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "runner"
   ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c auto \"npm -w server run dev\" \"npm -w client run dev\"",
-    "test": "npm -w client run test",
-    "build": "npm -w client run build && npm -w server run typecheck",
-    "make-sample": "tsx scripts/make-sample.ts"
+    "test": "npm -w client run test && npm -w runner run test",
+    "build": "npm -w client run build && npm -w server run typecheck && npm -w runner run typecheck",
+    "make-sample": "tsx scripts/make-sample.ts",
+    "stage": "npm -w runner run stage --"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

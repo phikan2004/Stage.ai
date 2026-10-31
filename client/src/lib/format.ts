@@ -1,3 +1,5 @@
+import type { DeckFormat } from "../../../shared/schema";
+
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -33,3 +35,13 @@ export function duration(ms: number): string {
 }
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A deck's display name: its file name without the extension. */
+export const deckTitle = (name: string) => name.replace(/\.(pdf|pptx)$/i, "");
+
+/** What a file really is, from its first bytes. .pptx files are zip archives, which start with "PK". */
+export function deckFormat(bytes: ArrayBuffer): DeckFormat | null {
+  const head = String.fromCharCode(...new Uint8Array(bytes.slice(0, 4)));
+  if (head === "%PDF") return "pdf";
+  return head === "PK\x03\x04" ? "pptx" : null;
+}
