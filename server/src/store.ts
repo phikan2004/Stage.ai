@@ -1,12 +1,14 @@
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   summarizeRun,
+  type DeckCreate,
   type DeckDetail,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
+  type DeckUpload,
   type HomeData,
   type Matter,
   type MatterDetail,
@@ -17,7 +19,20 @@ import {
   type RunSummary,
 } from "../../shared/schema.ts";
 
-/** Storage behind the /api routes. FileStore (local JSON) or SupabaseStore (Postgres + Storage). */
+/** createDeck was called before the PDF reached the upload url. */
+export class UploadMissingError extends Error {
+  constructor() {
+    super("The PDF upload didn't arrive. Try adding the presentation again.");
+  }
+}
+
+/** A PDF is either served from here (local) or fetched straight from storage via a temporary url. */
+export type PdfSource = { url: string } | { data: Buffer };
+
+/**
+ * Storage behind the /api routes. FileStore (local JSON) or SupabaseStore (Postgres + Storage).
+ * PDFs move directly between the browser and storage: serverless hosts cap requests at 4.5 MB.
+ */
 export interface Library {
   /** human-readable location, for the startup log */
   readonly where: string;
@@ -25,12 +40,16 @@ export interface Library {
   matter(id: string): Promise<MatterDetail | null>;
   deck(id: string): Promise<DeckDetail | null>;
   run(id: string): Promise<RunDetail | null>;
-  pdf(deckId: string): Promise<Buffer | null>;
+  pdf(deckId: string): Promise<PdfSource | null>;
   thumb(deckId: string): Promise<Buffer | null>;
   createMatter(name: string): Promise<Matter>;
   renameMatter(id: string, name: string): Promise<Matter | null>;
   deleteMatter(id: string): Promise<boolean>;
-  createDeck(matterId: string, name: string, pdf: Buffer, slideCount: number): Promise<DeckRecord | null>;
+  /** Reserves a deck id and says where to send its PDF; null if the matter doesn't exist. */
+  prepareUpload(matterId: string): Promise<DeckUpload | null>;
+  /** Only stores that upload through /api/uploads implement this. */
+  receiveUpload?(deckId: string, pdf: Buffer): Promise<boolean>;
+  createDeck(matterId: string, deck: DeckCreate): Promise<DeckRecord | null>;
   patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null>;
   setThumb(id: string, jpeg: Buffer): Promise<boolean>;
   deleteDeck(id: string): Promise<boolean>;
@@ -56,6 +75,8 @@ const RECENT_RUNS = 25;
 export class FileStore implements Library {
   private db: Db = { version: 1, matters: [], decks: [], runs: [] };
   private writing: Promise<void> = Promise.resolve();
+  /** ids handed out by prepareUpload; the only ids /api/uploads may write to */
+  private pending = new Set<string>();
 
   constructor(readonly dir: string) {}
 
@@ -168,9 +189,9 @@ export class FileStore implements Library {
     return { ...this.runSummary(r), events: r.events, deckExists: this.db.decks.some((d) => d.id === r.deckId) };
   }
 
-  async pdf(id: string): Promise<Buffer | null> {
+  async pdf(id: string): Promise<PdfSource | null> {
     if (!this.db.decks.some((d) => d.id === id)) return null;
-    return readFile(this.pdfPath(id));
+    return { data: await readFile(this.pdfPath(id)) };
   }
 
   async thumb(id: string): Promise<Buffer | null> {
@@ -208,14 +229,30 @@ export class FileStore implements Library {
     return true;
   }
 
-  async createDeck(matterId: string, name: string, pdf: Buffer, slideCount: number): Promise<DeckRecord | null> {
+  async prepareUpload(matterId: string): Promise<DeckUpload | null> {
     if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    const deckId = newId();
+    this.pending.add(deckId);
+    return { deckId, url: `/api/uploads/${deckId}` };
+  }
+
+  async receiveUpload(deckId: string, pdf: Buffer): Promise<boolean> {
+    if (!this.pending.has(deckId)) return false;
+    await mkdir(this.deckDir(deckId), { recursive: true });
+    await writeFile(this.pdfPath(deckId), pdf);
+    return true;
+  }
+
+  async createDeck(matterId: string, { deckId, name, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
+    if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    if (!this.pending.has(deckId) || !(await stat(this.pdfPath(deckId)).catch(() => null))) throw new UploadMissingError();
+    this.pending.delete(deckId);
     const now = Date.now();
     const d: DeckRecord = {
-      id: newId(),
+      id: deckId,
       matterId,
       name,
-      pdfHash: createHash("sha256").update(pdf).digest("hex"),
+      pdfHash,
       slideCount,
       slides: Array.from({ length: slideCount }, (_, index) => ({ index, regions: [] })),
       analyzed: false,
@@ -223,8 +260,6 @@ export class FileStore implements Library {
       createdAt: now,
       updatedAt: now,
     };
-    await mkdir(this.deckDir(d.id), { recursive: true });
-    await writeFile(this.pdfPath(d.id), pdf);
     this.db.decks.push(d);
     this.touchMatter(matterId, now);
     await this.save();

@@ -1,13 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import {
   normalizeRegions,
   summarizeRun,
+  type DeckCreate,
   type DeckDetail,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
+  type DeckUpload,
   type HomeData,
   type Matter,
   type MatterDetail,
@@ -19,16 +21,22 @@ import {
   type RunSummary,
   type Slide,
 } from "../../shared/schema.ts";
-import type { Library } from "./store.ts";
+import { UploadMissingError, type Library, type PdfSource } from "./store.ts";
 
 /** Where PDFs and thumbnails go. Supabase Storage in production; swappable for tests. */
 export interface BlobStore {
   put(path: string, data: Buffer, contentType: string): Promise<void>;
   get(path: string): Promise<Buffer | null>;
+  exists(path: string): Promise<boolean>;
+  /** Temporary url the browser can PUT a new file to. */
+  uploadUrl(path: string): Promise<string>;
+  /** Temporary url the browser can GET a file from. */
+  downloadUrl(path: string): Promise<string>;
   remove(paths: string[]): Promise<void>;
 }
 
 export const BUCKET = "producer-decks";
+const DOWNLOAD_URL_TTL_S = 300;
 
 export function supabaseBlobs(url: string, key: string, bucket = BUCKET): BlobStore {
   const storage = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }).storage.from(bucket);
@@ -41,6 +49,20 @@ export function supabaseBlobs(url: string, key: string, bucket = BUCKET): BlobSt
       const { data, error } = await storage.download(path);
       if (error || !data) return null;
       return Buffer.from(await data.arrayBuffer());
+    },
+    async exists(path) {
+      const { data } = await storage.exists(path);
+      return Boolean(data);
+    },
+    async uploadUrl(path) {
+      const { data, error } = await storage.createSignedUploadUrl(path);
+      if (error) throw new Error(`Storage upload url failed for ${path}: ${error.message}`);
+      return data.signedUrl;
+    },
+    async downloadUrl(path) {
+      const { data, error } = await storage.createSignedUrl(path, DOWNLOAD_URL_TTL_S);
+      if (error) throw new Error(`Storage download url failed for ${path}: ${error.message}`);
+      return data.signedUrl;
     },
     async remove(paths) {
       if (paths.length === 0) return;
@@ -55,6 +77,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (id: string) => UUID.test(id);
 const ms = (d: Date | null) => (d ? d.getTime() : null);
 const RECENT_RUNS = 25;
+const pdfPathFor = (deckId: string) => `${deckId}/deck.pdf`;
 
 /* Row shapes as they come back from Postgres (postgres.js: timestamptz → Date). */
 interface MatterRow {
@@ -218,8 +241,15 @@ export class SupabaseStore implements Library {
     }
     // Accept the project URL with or without a path (people often paste the …/rest/v1/ endpoint).
     const projectUrl = new URL(env.SUPABASE_URL).origin;
-    // prepare: false so it also works through Supabase's transaction pooler (port 6543).
-    const sql = postgres(env.DATABASE_URL, { prepare: false, max: 5, idle_timeout: 30, onnotice: () => {} });
+    // prepare: false for Supabase's transaction pooler (port 6543), the only route in from IPv4-only hosts like Vercel.
+    // Serverless instances keep a single connection so that many of them can't exhaust the pool.
+    const sql = postgres(env.DATABASE_URL, {
+      ssl: "require",
+      prepare: false,
+      max: env.VERCEL ? 1 : 5,
+      idle_timeout: 30,
+      onnotice: () => {},
+    });
     return new SupabaseStore(sql, supabaseBlobs(projectUrl, key), `Supabase (${new URL(projectUrl).host})`);
   }
 
@@ -297,10 +327,10 @@ export class SupabaseStore implements Library {
     return { ...toRunSummary(r), events: events.map(toEvent), deckExists: true };
   }
 
-  async pdf(deckId: string): Promise<Buffer | null> {
+  async pdf(deckId: string): Promise<PdfSource | null> {
     if (!isId(deckId)) return null;
     const [d] = await this.sql<{ pdf_path: string }[]>`select pdf_path from producer.decks where id = ${deckId}`;
-    return d ? this.blobs.get(d.pdf_path) : null;
+    return d ? { url: await this.blobs.downloadUrl(d.pdf_path) } : null;
   }
 
   async thumb(deckId: string): Promise<Buffer | null> {
@@ -332,17 +362,24 @@ export class SupabaseStore implements Library {
     return true;
   }
 
-  async createDeck(matterId: string, name: string, pdf: Buffer, slideCount: number): Promise<DeckRecord | null> {
+  async prepareUpload(matterId: string): Promise<DeckUpload | null> {
     if (!isId(matterId)) return null;
     const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
     if (!exists) return null;
-    const id = randomUUID();
-    const pdfPath = `${id}/deck.pdf`;
-    await this.blobs.put(pdfPath, pdf, "application/pdf");
+    const deckId = randomUUID();
+    return { deckId, url: await this.blobs.uploadUrl(pdfPathFor(deckId)) };
+  }
+
+  async createDeck(matterId: string, { deckId, name, pdfHash, slideCount }: DeckCreate): Promise<DeckRecord | null> {
+    if (!isId(matterId)) return null;
+    const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
+    if (!exists) return null;
+    const pdfPath = pdfPathFor(deckId);
+    if (!isId(deckId) || !(await this.blobs.exists(pdfPath))) throw new UploadMissingError();
     try {
       const [d] = await this.sql<DeckRow[]>`
         insert into producer.decks (id, matter_id, name, pdf_hash, slide_count, pdf_path)
-        values (${id}, ${matterId}, ${name.slice(0, 200)}, ${createHash("sha256").update(pdf).digest("hex")}, ${slideCount}, ${pdfPath})
+        values (${deckId}, ${matterId}, ${name}, ${pdfHash}, ${slideCount}, ${pdfPath})
         returning *`;
       return { ...toDeckBase(d), slides: toSlides(slideCount, []) };
     } catch (e) {

@@ -2,6 +2,7 @@ import type {
   DeckDetail,
   DeckPatch,
   DeckRecord,
+  DeckUpload,
   HomeData,
   Matter,
   MatterDetail,
@@ -31,12 +32,13 @@ export const api = {
   renameMatter: (id: string, name: string) => fetch(`/api/matters/${id}`, send("PATCH", { name })).then(json<Matter>),
   deleteMatter: (id: string) => fetch(`/api/matters/${id}`, send("DELETE")).then(json<void>),
 
-  uploadDeck: (matterId: string, name: string, pdf: ArrayBuffer, slides: number) =>
-    fetch(`/api/matters/${matterId}/decks?name=${encodeURIComponent(name)}&slides=${slides}`, {
-      method: "POST",
-      headers: { "content-type": "application/pdf" },
-      body: pdf,
-    }).then(json<DeckRecord>),
+  /** The PDF goes straight to storage, then the deck is registered with the server. */
+  uploadDeck: async (matterId: string, name: string, pdf: ArrayBuffer, pdfHash: string, slideCount: number) => {
+    const { deckId, url } = await fetch(`/api/matters/${matterId}/decks/upload`, send("POST", {})).then(json<DeckUpload>);
+    const put = await fetch(url, { method: "PUT", headers: { "content-type": "application/pdf" }, body: pdf });
+    if (!put.ok) throw new Error(`Couldn't upload the PDF (HTTP ${put.status})`);
+    return fetch(`/api/matters/${matterId}/decks`, send("POST", { deckId, name, pdfHash, slideCount })).then(json<DeckRecord>);
+  },
   deck: (id: string) => fetch(`/api/decks/${id}`).then(json<DeckDetail>),
   /** keepalive lets a save started during unload finish (bodies up to 64 KB). */
   patchDeck: (id: string, patch: DeckPatch, keepalive = false) =>
