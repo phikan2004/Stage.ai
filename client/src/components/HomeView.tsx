@@ -74,11 +74,15 @@ export default function HomeView() {
 
             {data.matters.length === 0 && (
               <div className="aside-line">
-                New here?{" "}
-                <button className="linkish" onClick={trySample} disabled={!!sampleBusy}>
-                  {sampleBusy ?? "Try the sample deck"}
-                </button>
-                . It ships with hand-checked regions, so you can present right away.
+                {sampleBusy ?? (
+                  <>
+                    New here?{" "}
+                    <button className="linkish" onClick={trySample}>
+                      Try the sample deck
+                    </button>
+                    . It ships with hand-checked regions, so you can present right away.
+                  </>
+                )}
               </div>
             )}
 

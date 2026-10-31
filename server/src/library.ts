@@ -1,7 +1,7 @@
 import express, { type Response } from "express";
 import { z } from "zod";
 import { DeckPatchSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
-import type { Store } from "./store.ts";
+import type { Library } from "./store.ts";
 
 const NameBody = z.object({ name: MatterSchema.shape.name });
 
@@ -10,11 +10,11 @@ const badRequest = (res: Response, error: z.ZodError) =>
   res.status(400).json({ error: error.issues[0]?.message ?? "Invalid request" });
 
 /** /api routes for matters, decks (PDF + regions + thumbnail) and presentation runs. */
-export function libraryRouter(store: Store) {
+export function libraryRouter(store: Library) {
   const r = express.Router();
 
-  r.get("/home", (_req, res) => {
-    res.json(store.home());
+  r.get("/home", async (_req, res) => {
+    res.json(await store.home());
   });
 
   /* ---------- matters ---------- */
@@ -25,8 +25,8 @@ export function libraryRouter(store: Store) {
     res.status(201).json(await store.createMatter(body.data.name));
   });
 
-  r.get("/matters/:id", (req, res) => {
-    const m = store.matter(req.params.id);
+  r.get("/matters/:id", async (req, res) => {
+    const m = await store.matter(req.params.id);
     if (!m) return void notFound(res, "Matter");
     res.json(m);
   });
@@ -57,8 +57,8 @@ export function libraryRouter(store: Store) {
     res.status(201).json(d);
   });
 
-  r.get("/decks/:id", (req, res) => {
-    const d = store.deck(req.params.id);
+  r.get("/decks/:id", async (req, res) => {
+    const d = await store.deck(req.params.id);
     if (!d) return void notFound(res, "Presentation");
     res.json(d);
   });
@@ -76,9 +76,10 @@ export function libraryRouter(store: Store) {
     res.status(204).end();
   });
 
-  r.get("/decks/:id/pdf", (req, res) => {
-    if (!store.deck(req.params.id)) return void notFound(res, "Presentation");
-    res.type("application/pdf").sendFile(store.pdfPath(req.params.id));
+  r.get("/decks/:id/pdf", async (req, res) => {
+    const pdf = await store.pdf(req.params.id);
+    if (!pdf) return void notFound(res, "Presentation");
+    res.type("application/pdf").send(pdf);
   });
 
   r.put("/decks/:id/thumb", express.raw({ type: "image/jpeg", limit: "5mb" }), async (req, res) => {
@@ -87,9 +88,10 @@ export function libraryRouter(store: Store) {
     res.status(204).end();
   });
 
-  r.get("/decks/:id/thumb", (req, res) => {
-    if (!store.deck(req.params.id)?.hasThumb) return void notFound(res, "Thumbnail");
-    res.set("cache-control", "no-cache").type("image/jpeg").sendFile(store.thumbPath(req.params.id));
+  r.get("/decks/:id/thumb", async (req, res) => {
+    const jpeg = await store.thumb(req.params.id);
+    if (!jpeg) return void notFound(res, "Thumbnail");
+    res.set("cache-control", "no-cache").type("image/jpeg").send(jpeg);
   });
 
   /* ---------- runs ---------- */
@@ -103,8 +105,8 @@ export function libraryRouter(store: Store) {
     res.status(201).json({ id: run.id });
   });
 
-  r.get("/runs/:id", (req, res) => {
-    const run = store.run(req.params.id);
+  r.get("/runs/:id", async (req, res) => {
+    const run = await store.run(req.params.id);
     if (!run) return void notFound(res, "Run");
     res.json(run);
   });

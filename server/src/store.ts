@@ -17,6 +17,27 @@ import {
   type RunSummary,
 } from "../../shared/schema.ts";
 
+/** Storage behind the /api routes. FileStore (local JSON) or SupabaseStore (Postgres + Storage). */
+export interface Library {
+  /** human-readable location, for the startup log */
+  readonly where: string;
+  home(): Promise<HomeData>;
+  matter(id: string): Promise<MatterDetail | null>;
+  deck(id: string): Promise<DeckDetail | null>;
+  run(id: string): Promise<RunDetail | null>;
+  pdf(deckId: string): Promise<Buffer | null>;
+  thumb(deckId: string): Promise<Buffer | null>;
+  createMatter(name: string): Promise<Matter>;
+  renameMatter(id: string, name: string): Promise<Matter | null>;
+  deleteMatter(id: string): Promise<boolean>;
+  createDeck(matterId: string, name: string, pdf: Buffer, slideCount: number): Promise<DeckRecord | null>;
+  patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null>;
+  setThumb(id: string, jpeg: Buffer): Promise<boolean>;
+  deleteDeck(id: string): Promise<boolean>;
+  addRun(input: RunInput): Promise<Run | null>;
+  deleteRun(id: string): Promise<boolean>;
+}
+
 interface Db {
   version: 1;
   matters: Matter[];
@@ -29,25 +50,29 @@ const byRecent = <T extends { updatedAt: number }>(a: T, b: T) => b.updatedAt - 
 const RECENT_RUNS = 25;
 
 /**
- * Everything lives in one JSON file plus a folder per deck (PDF + thumbnail). Fine for a single-user prototype;
- * writes are serialized and atomic (temp file + rename).
+ * Everything lives in one JSON file plus a folder per deck (PDF + thumbnail). The fallback when Supabase isn't
+ * configured; writes are serialized and atomic (temp file + rename).
  */
-export class Store {
+export class FileStore implements Library {
   private db: Db = { version: 1, matters: [], decks: [], runs: [] };
   private writing: Promise<void> = Promise.resolve();
 
   constructor(readonly dir: string) {}
 
+  get where() {
+    return this.dir;
+  }
+
   private get dbPath() {
     return join(this.dir, "db.json");
   }
-  deckDir(id: string) {
+  private deckDir(id: string) {
     return join(this.dir, "decks", id);
   }
-  pdfPath(id: string) {
+  private pdfPath(id: string) {
     return join(this.deckDir(id), "deck.pdf");
   }
-  thumbPath(id: string) {
+  private thumbPath(id: string) {
     return join(this.deckDir(id), "thumb.jpg");
   }
 
@@ -103,7 +128,7 @@ export class Store {
       .map((r) => this.runSummary(r));
   }
 
-  home(): HomeData {
+  async home(): Promise<HomeData> {
     const matters: MatterSummary[] = [...this.db.matters].sort(byRecent).map((m) => {
       const decks = this.db.decks.filter((d) => d.matterId === m.id).sort(byRecent);
       const runs = this.db.runs.filter((r) => r.matterId === m.id);
@@ -118,7 +143,7 @@ export class Store {
     return { matters, runs: this.recentRuns() };
   }
 
-  matter(id: string): MatterDetail | null {
+  async matter(id: string): Promise<MatterDetail | null> {
     const matter = this.db.matters.find((m) => m.id === id);
     if (!matter) return null;
     return {
@@ -131,16 +156,26 @@ export class Store {
     };
   }
 
-  deck(id: string): DeckDetail | null {
+  async deck(id: string): Promise<DeckDetail | null> {
     const d = this.db.decks.find((x) => x.id === id);
     if (!d) return null;
     return { ...d, matterName: this.db.matters.find((m) => m.id === d.matterId)?.name ?? "" };
   }
 
-  run(id: string): RunDetail | null {
+  async run(id: string): Promise<RunDetail | null> {
     const r = this.db.runs.find((x) => x.id === id);
     if (!r) return null;
     return { ...this.runSummary(r), events: r.events, deckExists: this.db.decks.some((d) => d.id === r.deckId) };
+  }
+
+  async pdf(id: string): Promise<Buffer | null> {
+    if (!this.db.decks.some((d) => d.id === id)) return null;
+    return readFile(this.pdfPath(id));
+  }
+
+  async thumb(id: string): Promise<Buffer | null> {
+    if (!this.db.decks.find((d) => d.id === id)?.hasThumb) return null;
+    return readFile(this.thumbPath(id));
   }
 
   /* ---------- writes ---------- */
