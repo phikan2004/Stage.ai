@@ -2,6 +2,7 @@ import type {
   Cue,
   DeckDetail,
   DeckFormat,
+  DeckMode,
   DeckPatch,
   DeckPlan,
   DeckRecord,
@@ -37,7 +38,7 @@ const MIME: Record<DeckFormat, string> = {
 export const api = {
   home: () => fetch("/api/home").then(json<HomeData>),
 
-  createMatter: (name: string) => fetch("/api/matters", send("POST", { name })).then(json<Matter>),
+  createMatter: (name: string, deckMode: DeckMode = "multiple") => fetch("/api/matters", send("POST", { name, deckMode })).then(json<Matter>),
   matter: (id: string) => fetch(`/api/matters/${id}`).then(json<MatterDetail>),
   renameMatter: (id: string, name: string) => fetch(`/api/matters/${id}`, send("PATCH", { name })).then(json<Matter>),
   deleteMatter: (id: string) => fetch(`/api/matters/${id}`, send("DELETE")).then(json<void>),

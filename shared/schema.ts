@@ -150,9 +150,14 @@ export function normalizeRegions(regions: Region[]): Region[] {
 const Id = z.string().min(1).max(64);
 
 /** A matter groups the presentations (decks) for one project, plus their run history. */
+/** Whether a matter holds a single presentation or several. */
+export const DeckModeSchema = z.enum(["single", "multiple"]);
+export type DeckMode = z.infer<typeof DeckModeSchema>;
+
 export const MatterSchema = z.object({
   id: Id,
   name: z.string().trim().min(1).max(200),
+  deckMode: DeckModeSchema,
   createdAt: z.number(),
   updatedAt: z.number(),
 });

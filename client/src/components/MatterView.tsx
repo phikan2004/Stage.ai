@@ -69,7 +69,7 @@ export default function MatterView({ id }: { id: string }) {
                 <span className="hint">{plural(data.decks.length, "deck")}</span>
               </div>
               <div className="cards">
-                <AddDeckCard matterId={id} />
+                {(data.matter.deckMode !== "single" || data.decks.length === 0) && <AddDeckCard matterId={id} />}
                 {data.decks.map((d) => (
                   <DeckCard key={d.id} deck={d} onDelete={() => deleteDeck(d)} />
                 ))}

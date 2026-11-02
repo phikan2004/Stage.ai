@@ -34,6 +34,7 @@ export function NameDialog({
   label,
   initial = "",
   submitLabel,
+  children,
   onSubmit,
   onClose,
 }: {
@@ -41,6 +42,7 @@ export function NameDialog({
   label: string;
   initial?: string;
   submitLabel: string;
+  children?: ReactNode;
   onSubmit: (name: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -76,6 +78,7 @@ export function NameDialog({
           <span className="micro">{label}</span>
           <input ref={input} className="field" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </label>
+        {children}
         {error && <div className="banner err">{error}</div>}
         <div className="dialog-actions">
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -92,6 +95,7 @@ export function NameDialog({
 
 export function NewMatterButton({ className, children }: { className?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [multiple, setMultiple] = useState(false);
   return (
     <>
       <button className={className} onClick={() => setOpen(true)}>
@@ -104,10 +108,26 @@ export function NewMatterButton({ className, children }: { className?: string; c
           submitLabel="Create matter"
           onClose={() => setOpen(false)}
           onSubmit={async (name) => {
-            const m = await api.createMatter(name);
+            const m = await api.createMatter(name, multiple ? "multiple" : "single");
             go(`/m/${m.id}`);
           }}
-        />
+        >
+          <div className="deck-mode">
+            <span className="micro">Presentations</span>
+            <div className="deck-mode-row">
+              <span className={multiple ? "" : "on"}>One</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={multiple}
+                aria-label="More than one presentation"
+                className={`switch ${multiple ? "on" : ""}`}
+                onClick={() => setMultiple(!multiple)}
+              />
+              <span className={multiple ? "on" : ""}>More than one</span>
+            </div>
+          </div>
+        </NameDialog>
       )}
     </>
   );

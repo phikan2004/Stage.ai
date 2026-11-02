@@ -9,6 +9,7 @@ import {
   type Cue,
   type DeckDetail,
   type DeckFormat,
+  type DeckMode,
   type DeckPatch,
   type DeckPlan,
   type DeckRecord,
@@ -27,7 +28,7 @@ import {
   type UsageEntry,
   type UsageSummary,
 } from "../../shared/schema.ts";
-import { UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
+import { MatterFullError, UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
 
 /** Where deck files and thumbnails go. Supabase Storage in production; swappable for tests. */
 export interface BlobStore {
@@ -89,6 +90,7 @@ const deckPathFor = (deckId: string, format: DeckFormat) => `${deckId}/deck.${fo
 interface MatterRow {
   id: string;
   name: string;
+  deck_mode: DeckMode;
   created_at: Date;
   updated_at: Date;
 }
@@ -146,7 +148,7 @@ interface EventRow {
   simulated: boolean;
 }
 
-const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
+const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, deckMode: r.deck_mode, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
 
 function toDeckBase(r: DeckRow): Omit<DeckRecord, "slides"> {
   return {
@@ -378,8 +380,8 @@ export class SupabaseStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string): Promise<Matter> {
-    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name) values (${name}) returning *`;
+  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
+    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name, deck_mode) values (${name}, ${deckMode}) returning *`;
     return toMatter(m);
   }
 
@@ -401,8 +403,11 @@ export class SupabaseStore implements Library {
 
   async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
     if (!isId(matterId)) return null;
-    const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
-    if (!exists) return null;
+    const [matter] = await this.sql<{ deck_mode: DeckMode; has_deck: boolean }[]>`
+      select deck_mode, exists (select 1 from producer.decks d where d.matter_id = m.id) as has_deck
+      from producer.matters m where id = ${matterId}`;
+    if (!matter) return null;
+    if (matter.deck_mode === "single" && matter.has_deck) throw new MatterFullError();
     const deckId = randomUUID();
     return { deckId, url: await this.blobs.uploadUrl(deckPathFor(deckId, format)) };
   }

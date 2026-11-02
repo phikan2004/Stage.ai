@@ -1,10 +1,11 @@
 import express, { type Response } from "express";
 import { z } from "zod";
-import { DeckCreateSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
-import { UploadMissingError, type Library } from "./store.ts";
+import { DeckCreateSchema, DeckModeSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
+import { MatterFullError, UploadMissingError, type Library } from "./store.ts";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const NameBody = z.object({ name: MatterSchema.shape.name });
+const NewMatterBody = NameBody.extend({ deckMode: DeckModeSchema.default("multiple") });
 
 const notFound = (res: Response, what: string) => res.status(404).json({ error: `${what} not found` });
 const badRequest = (res: Response, error: z.ZodError) =>
@@ -21,9 +22,9 @@ export function libraryRouter(store: Library) {
   /* ---------- matters ---------- */
 
   r.post("/matters", async (req, res) => {
-    const body = NameBody.safeParse(req.body);
+    const body = NewMatterBody.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    res.status(201).json(await store.createMatter(body.data.name));
+    res.status(201).json(await store.createMatter(body.data.name, body.data.deckMode));
   });
 
   r.get("/matters/:id", async (req, res) => {
@@ -51,9 +52,14 @@ export function libraryRouter(store: Library) {
   r.post("/matters/:id/decks/upload", async (req, res) => {
     const body = DeckUploadRequestSchema.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    const upload = await store.prepareUpload(req.params.id, body.data.format);
-    if (!upload) return void notFound(res, "Matter");
-    res.status(201).json(upload);
+    try {
+      const upload = await store.prepareUpload(req.params.id, body.data.format);
+      if (!upload) return void notFound(res, "Matter");
+      res.status(201).json(upload);
+    } catch (e) {
+      if (!(e instanceof MatterFullError)) throw e;
+      res.status(409).json({ error: e.message });
+    }
   });
 
   r.post("/matters/:id/decks", async (req, res) => {

@@ -31,7 +31,8 @@ whole flow without calling the vision model.
 
 - **Home** (`#/`) lists your matters, most recently active first.
 - A **matter** is one project. It holds its presentations (PowerPoint or PDF). Click **New
-  matter** to start one.
+  matter** to start one, and use the switch to choose whether it holds one presentation or more than one. A
+  one-presentation matter hides **Add a presentation** until its deck is deleted.
 - A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
   records the slides shown, every zoom, every voice command and what was heard. Run history isn't linked from the
   app right now, but runs are still saved and each one's page still works at `#/r/<id>`.

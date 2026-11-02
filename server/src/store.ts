@@ -6,6 +6,7 @@ import {
   type DeckCreate,
   type DeckDetail,
   type DeckFormat,
+  type DeckMode,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
@@ -29,6 +30,13 @@ export class UploadMissingError extends Error {
   }
 }
 
+/** prepareUpload was called for a one-presentation matter that already has its presentation. */
+export class MatterFullError extends Error {
+  constructor() {
+    super("This matter holds one presentation. Delete it to add a different one.");
+  }
+}
+
 /** A deck's file is either served from here (local) or fetched straight from storage via a temporary url. */
 export type DeckFileSource = { url: string } | { data: Buffer };
 
@@ -45,7 +53,7 @@ export interface Library {
   run(id: string): Promise<RunDetail | null>;
   deckFile(deckId: string): Promise<DeckFileSource | null>;
   thumb(deckId: string): Promise<Buffer | null>;
-  createMatter(name: string): Promise<Matter>;
+  createMatter(name: string, deckMode: DeckMode): Promise<Matter>;
   renameMatter(id: string, name: string): Promise<Matter | null>;
   deleteMatter(id: string): Promise<boolean>;
   /** Reserves a deck id and says where to send its file; null if the matter doesn't exist. */
@@ -107,6 +115,7 @@ export class FileStore implements Library {
     await mkdir(join(this.dir, "decks"), { recursive: true });
     try {
       this.db = { ...this.db, ...JSON.parse(await readFile(this.dbPath, "utf8")) };
+      for (const m of this.db.matters) m.deckMode ??= "multiple";
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
@@ -208,9 +217,9 @@ export class FileStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string): Promise<Matter> {
+  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
     const now = Date.now();
-    const m: Matter = { id: newId(), name, createdAt: now, updatedAt: now };
+    const m: Matter = { id: newId(), name, deckMode, createdAt: now, updatedAt: now };
     this.db.matters.push(m);
     await this.save();
     return m;
@@ -237,7 +246,9 @@ export class FileStore implements Library {
   }
 
   async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
-    if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    const matter = this.db.matters.find((m) => m.id === matterId);
+    if (!matter) return null;
+    if (matter.deckMode === "single" && this.db.decks.some((d) => d.matterId === matterId)) throw new MatterFullError();
     const deckId = newId();
     this.pending.set(deckId, format);
     return { deckId, url: `/api/uploads/${deckId}` };
