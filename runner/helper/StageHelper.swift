@@ -196,7 +196,9 @@ func filter(for id: CGDirectDisplayID) throws -> SCContentFilter {
   if let f = filters[id] { return f }
   let content = try await_ { try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
   guard let d = content.displays.first(where: { $0.displayID == id }) else { throw HelperError(message: "No display \(id)") }
-  let f = SCContentFilter(display: d, excludingWindows: [])
+  // The black curtain stays out of captures, so the operator can see the real screen behind it.
+  let own = content.windows.filter { $0.owningApplication?.processID == getpid() }
+  let f = SCContentFilter(display: d, excludingWindows: own)
   filters[id] = f
   return f
 }
@@ -233,6 +235,55 @@ func capture(_ req: Json) throws -> Json {
   CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.72] as CFDictionary)
   CGImageDestinationFinalize(dest)
   return ["data": (out as Data).base64EncodedString(), "width": image.width, "height": image.height, "grid": grid(image)]
+}
+
+/* ---------- curtain ---------- */
+
+// A black window over one display, for opening a demo. It takes no clicks, and it closes with this process.
+var curtain: NSWindow?
+var curtainUp = false
+let FADE_STEPS = 30
+
+func fade(_ window: NSWindow, from: Double, to: Double, ms: Double) {
+  for i in 1...FADE_STEPS {
+    let alpha = from + (to - from) * Double(i) / Double(FADE_STEPS)
+    DispatchQueue.main.async { window.alphaValue = alpha }
+    usleep(useconds_t(ms * 1000 / Double(FADE_STEPS)))
+  }
+}
+
+func setCurtain(_ req: Json) throws {
+  let ms = num(req["fadeMs"]) ?? 500
+  if req["on"] as? Bool != true {
+    curtainUp = false
+    guard let window = curtain else { return }
+    fade(window, from: 1, to: 0, ms: ms)
+    DispatchQueue.main.sync { window.orderOut(nil) }
+    curtain = nil
+    filters.removeAll()
+    return
+  }
+  if curtain != nil { return }
+  guard let id = num(req["display"]) else { throw HelperError(message: "display is required") }
+  let window: NSWindow = try DispatchQueue.main.sync {
+    let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.doubleValue == id }
+    guard let screen else { throw HelperError(message: "No display \(id)") }
+    let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    w.isReleasedWhenClosed = false
+    w.backgroundColor = .black
+    w.alphaValue = 0
+    w.level = .screenSaver
+    w.ignoresMouseEvents = true
+    w.hasShadow = false
+    w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+    w.setFrame(screen.frame, display: true)
+    w.orderFrontRegardless()
+    return w
+  }
+  curtain = window
+  fade(window, from: 0, to: 1, ms: ms)
+  curtainUp = true
+  filters.removeAll()
 }
 
 /* ---------- accessibility ---------- */
@@ -336,6 +387,10 @@ let onKey: CGEventTapCallBack = { _, type, event, _ in
   }
   if event.getIntegerValueField(.eventSourceUserData) == OWN_EVENT { return Unmanaged.passUnretained(event) }
   switch event.getIntegerValueField(.keyboardEventKeycode) {
+  // While the screen is black, any of the usual "go" keys starts the demo.
+  case 36 where curtainUp, 49 where curtainUp, 124 where curtainUp:
+    emit(["event": "hotkey", "name": "advance"])
+    return nil
   case 53:
     let now = DispatchTime.now().uptimeNanoseconds
     if now - lastEsc < DOUBLE_ESC_NS { emit(["event": "hotkey", "name": "stop"]) }
@@ -472,6 +527,7 @@ func handle(_ req: Json) throws -> Json {
   case "scroll": try scroll(req)
   case "place": try place(req)
   case "hotkeys": try startHotkeys()
+  case "curtain": try setCurtain(req)
   case "record": try setRecording(req["on"] as? Bool ?? false)
   default: throw HelperError(message: "Unknown command: \(req["cmd"] ?? "none")")
   }
@@ -494,5 +550,8 @@ Thread.detachNewThread {
   exit(0)
 }
 
-// The event tap needs the main run loop.
+// The curtain needs an app connection, with no Dock icon. The event tap and the curtain both need the main run loop.
+_ = NSApplication.shared
+NSApp.setActivationPolicy(.accessory)
+NSApp.finishLaunching()
 RunLoop.main.run()

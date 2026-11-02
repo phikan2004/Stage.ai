@@ -28,6 +28,7 @@ export default function ShowView({ id }: { id: string }) {
   const [log, setLog] = useState<string[]>([]);
   const [approval, setApproval] = useState<{ id: string; question: string } | null>(null);
   const [lastRun, setLastRun] = useState<DryRun | null>(null);
+  const [waiting, setWaiting] = useState(false);
   const [heard, setHeard] = useState("");
   const speech = useRef<SpeechSource | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -66,12 +67,15 @@ export default function ShowView({ id }: { id: string }) {
       setLastRun(null);
     }
     if (msg.type === "beat") setActiveBeat(msg.beatId);
+    if (msg.type === "waiting") setWaiting(true);
+    if (msg.type === "begun") setWaiting(false);
     if (msg.type === "approval") setApproval({ id: msg.id, question: msg.question });
     if (msg.type === "agent") {
       const line = describeEvent(msg.event);
       if (line) setLog((l) => [...l.slice(-MAX_LOG + 1), line]);
     }
     if (msg.type === "dry-run:done") {
+      setWaiting(false);
       setActiveBeat(null);
       setApproval(null);
       setLastRun(msg.run);
@@ -201,15 +205,22 @@ export default function ShowView({ id }: { id: string }) {
               </div>
               <div className="stage-actions">
                 {busy === "dry-run" ? (
-                  <button className="btn accent" onClick={() => stage.send({ type: "stop" })}>
-                    Stop
-                  </button>
+                  <>
+                    {waiting && (
+                      <button className="btn primary" onClick={() => stage.send({ type: "begin" })}>
+                        Begin
+                      </button>
+                    )}
+                    <button className="btn accent" onClick={() => stage.send({ type: "stop" })}>
+                      Stop
+                    </button>
+                  </>
                 ) : (
                   <button className="btn primary" disabled={!ready} onClick={startDryRun}>
                     Start dry run
                   </button>
                 )}
-                <span className="hint">Double Esc stops it from anywhere.</span>
+                <span className="hint">The screen goes black until you press Space or Return. Double Esc stops it from anywhere.</span>
               </div>
               {approval && (
                 <div className="banner stage-approval">

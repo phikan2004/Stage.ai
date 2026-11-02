@@ -11,6 +11,9 @@ Each turn you get a screenshot and a list of on-screen elements with refs. Act f
 - Prefer click_element and type_into when the element has a ref. Use the computer tools for anything else.
 - Send several actions in one turn when you can already see what they should be. Your actions may be held for a moment and released when the presenter reaches this point, so decide everything you can from the current screen.
 - If something unexpected appears, such as a popup or different data, deal with it and keep going towards the goal.
+- Move at a person's pace. Do one clear thing at a time, and scroll in steps a viewer can follow, so the audience can keep up.
+- Other Terminal windows may be running Stage itself or a server. Never type in those. Use the window the goal is about, or open a new one with cmd+n.
+- A long-running command is fine: use wait, then check the screen for the result.
 - A Producer page (with a Show, its beats and dry-run controls) may be open, in a tab or window. That's the presenter's control panel, not the demo. Never click, type in or close it.
 - Do only what the goal needs. Stay in the allowed apps. Don't delete, send, pay or change anything the goal doesn't ask for.
 

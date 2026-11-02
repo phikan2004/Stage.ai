@@ -61,7 +61,8 @@ npm run stage
    learn. Only that display, what you do on it, and your voice are recorded. Password fields aren't. Recordings stay in
    `data/recordings/`.
 2. **Review:** check the beats and the limits. Add corrections in each beat's notes.
-3. **Dry run:** the AI performs the show live. Each beat is scored. Dry runs don't reset your demo yet, so put it back
+3. **Dry run:** the screen goes black while the AI gets ready. Press Space, Return, the Right arrow or Begin on the page,
+   and it performs the show live. Each beat is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
    to its starting state yourself between runs.
 
 `stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using Shows

@@ -43,6 +43,8 @@ export interface BeatOptions {
   pollMs?: number;
   /** ms for the screen to settle after a batch of actions */
   settleMs?: number;
+  /** ms between actions, so the audience can follow */
+  actionGapMs?: () => number;
 }
 
 export interface BeatReport {
@@ -236,7 +238,8 @@ export async function runBeat(o: BeatOptions): Promise<BeatReport> {
   async function execute(calls: ToolUse[], view: View, refused: Map<string, string>): Promise<ContentParam[]> {
     const out: ContentParam[] = [];
     let failed = false;
-    for (const call of calls) {
+    for (const [i, call] of calls.entries()) {
+      if (i > 0 && !failed && o.actionGapMs) await sleep(o.actionGapMs());
       if (failed) {
         out.push(result(call, NOT_RUN, true));
         continue;

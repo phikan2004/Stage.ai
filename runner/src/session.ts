@@ -7,9 +7,12 @@ import { DesktopDriver } from "./desktopDriver.ts";
 import type { Display, Helper } from "./helper.ts";
 import { learn } from "./learn.ts";
 import { claudeModel } from "./model.ts";
+import { actionGapMs, beatGapMs } from "./pace.ts";
 import { Recorder } from "./recorder.ts";
 import { presenterActed } from "./timeline.ts";
 import type { Limits } from "./safety.ts";
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const SAFE_PATH = /^[A-Za-z0-9_-]+\/f\d+\.jpg$/;
 
@@ -33,6 +36,8 @@ export class StageSession {
   private stop: AbortController | null = null;
   private busy: "recording" | "learning" | "dry-run" | null = null;
   private approvals = new Map<string, (yes: boolean) => void>();
+  /** The presenter's go, while the screen is black. */
+  private begin: (() => void) | null = null;
 
   constructor(
     private helper: Helper,
@@ -58,7 +63,8 @@ export class StageSession {
   hotkey(name: string) {
     if (name === "stop") this.halt();
     const [first] = this.approvals.keys();
-    if (first && (name === "advance" || name === "back")) this.answer(first, name === "advance");
+    if (first && (name === "advance" || name === "back")) return this.answer(first, name === "advance");
+    if (name === "advance") this.begin?.();
   }
 
   halt() {
@@ -85,6 +91,8 @@ export class StageSession {
         return this.status();
       case "stop":
         return this.halt();
+      case "begin":
+        return this.begin?.();
       case "approve":
         return this.answer(String(msg.id), msg.yes === true);
       case "said":
@@ -129,17 +137,32 @@ export class StageSession {
     ];
   }
 
+  private curtain(on: boolean) {
+    return this.helper.call("curtain", { on, display: this.display.id });
+  }
+
   /** The operator performs the show live, beat by beat, and stops at the first beat it can't finish. */
   private async dryRun(show: Show) {
     if (this.busy) throw new Error(`Stage is busy: ${this.busy}.`);
     this.setBusy("dry-run");
     const stop = new AbortController();
     this.stop = stop;
-    const driver = new DesktopDriver(this.helper, this.display);
+    const driver = new DesktopDriver(this.helper, this.display, stop.signal);
     const model = claudeModel({ brief: showBrief(show) });
     const results: BeatResult[] = [];
+    // The screen starts black, and the operator gets its first move ready behind it. Nothing runs until the presenter goes.
+    await this.curtain(true);
+    const begun = new Promise<void>((resolve) => {
+      this.begin = () => {
+        this.begin = null;
+        this.send({ type: "begun" });
+        resolve(this.curtain(false));
+      };
+    });
+    this.send({ type: "waiting" });
     try {
-      for (const beat of show.beats) {
+      for (const [i, beat] of show.beats.entries()) {
+        if (i > 0) await sleep(beatGapMs());
         this.send({ type: "beat", beatId: beat.id });
         const report = await runBeat({
           goal: beatGoal(beat),
@@ -148,22 +171,28 @@ export class StageSession {
           model,
           limits: toLimits(show),
           hold: true,
-          release: Promise.resolve(),
+          release: i === 0 ? begun : Promise.resolve(),
           signal: stop.signal,
+          actionGapMs,
           onEvent: (event) => this.send({ type: "agent", beatId: beat.id, event }),
-          approve: (question) =>
-            new Promise((resolve) => {
+          approve: async (question) => {
+            // The presenter has to be able to read it.
+            await this.curtain(false);
+            return new Promise((resolve) => {
               const id = randomBytes(4).toString("hex");
               this.approvals.set(id, resolve);
               this.send({ type: "approval", id, question });
-            }),
+            });
+          },
         });
         results.push({ beatId: beat.id, outcome: report.outcome, summary: report.summary, ms: report.totalMs, cueToActionMs: report.cueToActionMs });
         if (report.outcome !== "done") break;
       }
     } finally {
       this.stop = null;
+      this.begin = null;
       this.approvals.clear();
+      await this.curtain(false).catch(() => {});
       this.send({ type: "dry-run:done", run: { at: Date.now(), results } });
       this.setBusy(null);
     }
