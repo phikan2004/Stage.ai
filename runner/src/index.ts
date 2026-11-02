@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import dotenv from "dotenv";
@@ -86,6 +86,8 @@ const TRIES: Record<string, (d: Driver) => Promise<void>> = {
   },
   async terminal(d) {
     await d.open("Terminal");
+    // A new window, so this doesn't type into the one running Stage.
+    await d.key("cmd+n");
     await d.look();
     await d.type("echo hello from stage");
   },
@@ -104,16 +106,17 @@ async function goal(helper: Helper, text: string) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let release = () => {};
   const released = new Promise<void>((r) => (release = r));
-  let approving = false;
+  let answer: ((yes: boolean) => void) | null = null;
 
   process.on("SIGINT", () => stop.abort());
   await helper
     .onHotkey((name) => {
       if (name === "stop") stop.abort();
-      if (name === "advance") release();
+      if (name === "advance") answer ? answer(true) : release();
+      if (name === "back") answer?.(false);
     })
     .catch(() => console.log("Hotkeys are off until Accessibility is granted. Ctrl-C stops."));
-  rl.on("line", () => !approving && release());
+  rl.on("line", (line) => (answer ? answer(/^y/i.test(line.trim())) : release()));
 
   const hold = !args["no-hold"];
   const after = args["release-after"];
@@ -129,11 +132,15 @@ async function goal(helper: Helper, text: string) {
     hold,
     release: released,
     signal: stop.signal,
-    approve: async (q) => {
-      approving = true;
-      const a = await rl.question(`Approve? ${q} [y/N] `);
-      approving = false;
-      return /^y/i.test(a);
+    // The clicker answers too: clicking into this window would take focus away from the demo.
+    approve: (q) => {
+      console.log(`Approve? ${q}\n  PageDown or y = yes, PageUp or n = no`);
+      return new Promise((resolve) => {
+        answer = (yes) => {
+          answer = null;
+          resolve(yes);
+        };
+      });
     },
     onEvent: (e) => {
       console.log("·", JSON.stringify(e));

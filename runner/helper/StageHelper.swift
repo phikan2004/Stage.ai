@@ -260,8 +260,18 @@ let ACTIONABLE: Set<String> = [
   "AXRow", "AXSlider", "AXTab", "AXTextArea", "AXTextField",
 ]
 
+/// The owner of the top window. NSWorkspace's answer can go stale in a process with no NSApplication.
+func frontApp() -> NSRunningApplication? {
+  let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+  for w in windows where (w[kCGWindowLayer as String] as? NSNumber)?.intValue == 0 {
+    guard let pid = (w[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, let app = NSRunningApplication(processIdentifier: pid) else { continue }
+    if app.activationPolicy == .regular { return app }
+  }
+  return NSWorkspace.shared.frontmostApplication
+}
+
 func frontmost() -> Json {
-  guard let app = NSWorkspace.shared.frontmostApplication else { return [:] }
+  guard let app = frontApp() else { return [:] }
   var out: Json = ["app": app.localizedName ?? "", "bundleId": app.bundleIdentifier ?? "", "pid": app.processIdentifier]
   let el = AXUIElementCreateApplication(app.processIdentifier)
   AXUIElementSetMessagingTimeout(el, 0.25)
@@ -274,7 +284,7 @@ func frontmost() -> Json {
 }
 
 func tree(_ req: Json) -> Json {
-  guard let app = NSWorkspace.shared.frontmostApplication else { return ["elements": []] }
+  guard let app = frontApp() else { return ["elements": []] }
   let root = AXUIElementCreateApplication(app.processIdentifier)
   AXUIElementSetMessagingTimeout(root, 0.25)
   guard let w = attr(root, kAXFocusedWindowAttribute), CFGetTypeID(w) == AXUIElementGetTypeID() else { return ["elements": []] }
@@ -300,7 +310,7 @@ func tree(_ req: Json) -> Json {
 
 /// Move and size the frontmost window, so an app lands on the stage display at a known place.
 func place(_ req: Json) throws {
-  guard let app = NSWorkspace.shared.frontmostApplication else { throw HelperError(message: "No frontmost app") }
+  guard let app = frontApp() else { throw HelperError(message: "No frontmost app") }
   let el = AXUIElementCreateApplication(app.processIdentifier)
   guard let w = attr(el, kAXFocusedWindowAttribute), CFGetTypeID(w) == AXUIElementGetTypeID() else {
     throw HelperError(message: "\(app.localizedName ?? "App") has no focused window")
@@ -395,5 +405,5 @@ Thread.detachNewThread {
   exit(0)
 }
 
-// NSWorkspace's frontmost app and the event tap both need the main run loop.
+// The event tap needs the main run loop.
 RunLoop.main.run()

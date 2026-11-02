@@ -154,7 +154,7 @@ export async function runBeat(o: BeatOptions): Promise<BeatReport> {
     for (const call of calls) {
       const input = call.input as Record<string, any>;
       const ask = async (question: string) => {
-        if (!(await o.approve(question))) refused.set(call.id, "The presenter declined this action.");
+        if (!(await Promise.race([o.approve(question), stopped]))) refused.set(call.id, "The presenter declined this action.");
       };
       if (call.name === "key" && keyBlocked(String(input.text))) {
         refused.set(call.id, "That shortcut leaves the allowed apps.");
