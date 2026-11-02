@@ -90,6 +90,10 @@ export function libraryRouter(store: Library) {
     res.json(d);
   });
 
+  r.get("/decks/:id/usage", async (req, res) => {
+    res.json(await store.deckUsage(req.params.id));
+  });
+
   r.delete("/decks/:id", async (req, res) => {
     if (!(await store.deleteDeck(req.params.id))) return void notFound(res, "Presentation");
     res.status(204).end();

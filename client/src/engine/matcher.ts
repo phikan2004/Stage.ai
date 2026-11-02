@@ -9,6 +9,9 @@ interface Phrase {
   df: number;
 }
 
+/** A presenter phrase from the director. Hearing one is strong evidence on its own. */
+const TRIGGER_WEIGHT = 1.5;
+
 export interface CompiledRegion {
   id: string;
   /** stem → weight (a word of a k-word keyword weighs 1/k) */
@@ -16,12 +19,17 @@ export interface CompiledRegion {
   /** stem → number of regions on the slide containing it */
   df: Map<string, number>;
   phrases: Phrase[];
+  triggers: string[][];
 }
 
 export interface RegionScore {
   id: string;
   score: number;
   raw: number;
+  /** how many words unique to this region were heard */
+  hits?: number;
+  /** one of the region's trigger phrases was heard */
+  trigger?: boolean;
 }
 
 /** Precompute per-slide region terms. Call once per slide, not per tick. */
@@ -39,7 +47,8 @@ export function compileRegions(regions: Region[], labelWeight: number): Compiled
     };
     for (const k of r.keywords) add(k, 1);
     add(r.label, labelWeight);
-    return { id: r.id, stems, df: new Map<string, number>(), phrases };
+    const triggers = (r.phrases ?? []).map(tokenize).filter((t) => t.length > 1);
+    return { id: r.id, stems, df: new Map<string, number>(), phrases, triggers };
   });
 
   const counts = new Map<string, number>();
@@ -69,6 +78,30 @@ function matchStrength(a: string, b: string, fuzzyThreshold: number): number {
   return s >= fuzzyThreshold ? s : 0;
 }
 
+/**
+ * Whether a trigger phrase was spoken. People don't say a phrase verbatim, so words must appear in order but may have
+ * a word or two between them, and phrases of 4+ words may miss one.
+ */
+function triggerHeard(tokens: WindowToken[], stems: string[], fuzzyThreshold: number): boolean {
+  const need = stems.length <= 3 ? stems.length : stems.length - 1;
+  for (let start = 0; start < tokens.length; start++) {
+    let found = 0;
+    let next = 0;
+    const end = Math.min(tokens.length, start + stems.length + 3);
+    for (let i = start; i < end && next < stems.length; i++) {
+      for (let j = next; j < stems.length; j++) {
+        if (matchStrength(tokens[i].stem, stems[j], fuzzyThreshold)) {
+          found++;
+          next = j + 1;
+          break;
+        }
+      }
+    }
+    if (found >= need) return true;
+  }
+  return false;
+}
+
 export function recency(t: number, now: number, cfg: Pick<ProducerConfig, "windowMs" | "recencyFloor">): number {
   const age = Math.max(0, now - t);
   if (age > cfg.windowMs) return 0;
@@ -86,6 +119,7 @@ export function scoreRegions(
 
   const scores = regions.map((r) => {
     let raw = 0;
+    let hits = 0;
 
     // Single words: best evidence per stem, so repeating a word doesn't snowball.
     for (const [stem, w] of r.stems) {
@@ -95,6 +129,7 @@ export function scoreRegions(
         if (m) best = Math.max(best, m * tokenW[i]);
       }
       raw += (w * best) / (r.df.get(stem) ?? 1);
+      if (best > 0 && r.df.get(stem) === 1) hits++;
     }
 
     // Multi-word keywords spoken in order earn an extra bonus.
@@ -116,7 +151,10 @@ export function scoreRegions(
       raw += ((cfg.phraseBonus - 1) * p.weight * best) / p.df;
     }
 
-    return { id: r.id, raw, score: 1 - Math.exp(-raw / cfg.saturation) };
+    const trigger = r.triggers.some((t) => triggerHeard(tokens, t, cfg.fuzzyThreshold));
+    if (trigger) raw += TRIGGER_WEIGHT;
+
+    return { id: r.id, raw, hits, trigger, score: 1 - Math.exp(-raw / cfg.saturation) };
   });
 
   return scores.sort((a, b) => b.score - a.score);

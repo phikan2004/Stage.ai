@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MAX_RUN_EVENTS, type RunEvent, type RunInput } from "../../../shared/schema";
+import { MAX_RUN_EVENTS, type Region, type RunEvent, type RunInput } from "../../../shared/schema";
 import type { Deck } from "../lib/deck";
 import { ZoomDirector } from "../engine/director";
 import type { RegionScore } from "../engine/matcher";
@@ -14,6 +14,8 @@ import { WebSpeechSource } from "../speech/WebSpeechSource";
 import { keytermsFor } from "../engine/keyterms";
 import { COMMAND_KEYTERMS, parseCommand, type Command } from "../engine/commands";
 import type { SpeechSource } from "../speech/SpeechSource";
+import { surroundingColor } from "../lib/textLines";
+import CueOverlay from "./CueOverlay";
 import DebugPanel from "./DebugPanel";
 
 interface Props {
@@ -88,6 +90,9 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
   autoRef.current = auto;
   debugRef.current = debug;
 
+  /** Reveal cues that have fired, and the colour that hides the ones that haven't. Both are keyed "slide:region". */
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+  const [covers, setCovers] = useState<Record<string, string>>({});
   const regions = deck.slides[index]?.regions ?? [];
   const image = deck.images[index];
   const indexRef = useRef(index);
@@ -125,8 +130,9 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
       if (a.type === "zoomTo") {
         setZoomId(a.regionId);
         setLastZoomId(a.regionId);
-        const label = regionsRef.current.find((r) => r.id === a.regionId)?.label ?? a.regionId;
-        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label });
+        const region = regionsRef.current.find((r) => r.id === a.regionId);
+        if (region?.cue === "reveal") setRevealed((s) => new Set(s).add(`${indexRef.current}:${region.id}`));
+        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue });
       } else if (a.type === "zoomOut") {
         setZoomId(null);
       }
@@ -135,6 +141,21 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
   );
 
   useEffect(() => director.current.setConfig(config), [config]);
+
+  useEffect(() => {
+    let alive = true;
+    for (const slide of deck.slides) {
+      for (const r of slide.regions) {
+        if (r.cue !== "reveal") continue;
+        surroundingColor(deck.images[slide.index], r.box)
+          .then((color) => alive && setCovers((c) => ({ ...c, [`${slide.index}:${r.id}`]: color })))
+          .catch(() => {});
+      }
+    }
+    return () => {
+      alive = false;
+    };
+  }, [deck]);
 
   // Slide change → immediate zoom-out and a fresh transcript window.
   useEffect(() => {
@@ -335,8 +356,12 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     return () => clearTimeout(id);
   }, []);
 
-  const zoomRegion = regions.find((r) => r.id === zoomId);
-  const spotRegion = regions.find((r) => r.id === (zoomId ?? lastZoomId));
+  const activeRegion = regions.find((r) => r.id === zoomId);
+  const lastRegion = regions.find((r) => r.id === (zoomId ?? lastZoomId));
+  const zooms = (r?: Region) => r !== undefined && (r.cue === undefined || r.cue === "zoom");
+  const zoomRegion = zooms(activeRegion) ? activeRegion : undefined;
+  const spotRegion = zooms(lastRegion) || lastRegion?.cue === "spotlight" ? lastRegion : undefined;
+  const hidden = regions.filter((r) => r.cue === "reveal" && !revealed.has(`${index}:${r.id}`));
   const transform = zoomRegion ? computeZoom(zoomRegion.box, config.zoomPadding, config.maxZoom) : IDENTITY;
   const ease = `${config.transitionMs}ms cubic-bezier(.22,.61,.36,1)`;
   const pad = config.zoomPadding * 0.5;
@@ -366,11 +391,27 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
                 width: `${(spotRegion.box.w + 2 * pad) * 100}%`,
                 height: `${(spotRegion.box.h + 2 * pad) * 100}%`,
                 boxShadow: `0 0 0 200vmax rgba(20, 20, 22, ${config.dimOpacity})`,
-                opacity: zoomRegion ? 1 : 0,
+                opacity: activeRegion ? 1 : 0,
                 transition: `opacity ${ease}`,
               }}
             />
           )}
+          {lastRegion && (
+            <CueOverlay region={lastRegion} pad={pad} aspect={image.width / image.height} visible={Boolean(activeRegion)} ease={ease} />
+          )}
+          {hidden.map((r) => (
+            <div
+              key={r.id}
+              className="cue-cover"
+              style={{
+                left: `${r.box.x * 100}%`,
+                top: `${r.box.y * 100}%`,
+                width: `${r.box.w * 100}%`,
+                height: `${r.box.h * 100}%`,
+                background: covers[`${index}:${r.id}`] ?? "#fff",
+              }}
+            />
+          ))}
           {outlines &&
             regions.map((r) => (
               <div

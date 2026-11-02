@@ -2,14 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckDetail, Region, RunInput, Slide } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { cacheImages, cachedImages, renderDeck, takeNotices, type Deck } from "../lib/deck";
-import { buildFile, downloadFile, parseRegionsFile } from "../lib/fileIO";
 import { deckTitle } from "../lib/format";
-import AnalyzeView from "./AnalyzeView";
 import { Loading, TopBar } from "./Chrome";
 import PresentView from "./PresentView";
 import ReviewEditor from "./ReviewEditor";
 
-type Stage = "analyze" | "review" | "present";
+type Stage = "review" | "present";
 type SaveState = "saved" | "saving" | "error";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -50,7 +48,6 @@ export default function DeckView({ id }: { id: string }) {
         const slides: Slide[] = images.map((_, index) => ({ index, regions: d.slides.find((s) => s.index === index)?.regions ?? [] }));
         saved.current = slides;
         setDeck({ name: d.name, hash: d.pdfHash, images, slides });
-        setStage(d.analyzed ? "review" : "analyze");
         setWarnings(takeNotices(id));
         setLoading(null);
       } catch (e) {
@@ -103,26 +100,6 @@ export default function DeckView({ id }: { id: string }) {
     setDeck((d) => d && { ...d, slides: d.slides.map((s) => (s.index === index ? { ...s, regions } : s)) });
   }, []);
 
-  const importRegions = (text: string) => {
-    if (!deck) return;
-    try {
-      const loaded = parseRegionsFile(text, deck.hash, deck.images.length);
-      setDeck({ ...deck, slides: loaded.file.slides });
-      setWarnings(loaded.warnings);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const finishAnalysis = () => {
-    setStage("review");
-    if (detail && !detail.analyzed) {
-      setDetail({ ...detail, analyzed: true });
-      api.patchDeck(id, { analyzed: true }).catch(() => {});
-    }
-  };
-
   /* ---------- presenting ---------- */
   const present = (from: number) => {
     setStartSlide(from);
@@ -173,14 +150,6 @@ export default function DeckView({ id }: { id: string }) {
             <span className={`save-state ${saveState}`}>
               {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}
             </span>
-            <nav className="seg">
-              <button className={stage === "analyze" ? "on" : ""} onClick={() => setStage("analyze")}>
-                Analyze
-              </button>
-              <button className={stage === "review" ? "on" : ""} onClick={finishAnalysis}>
-                Review
-              </button>
-            </nav>
           </>
         )}
       </TopBar>
@@ -198,15 +167,13 @@ export default function DeckView({ id }: { id: string }) {
 
       {!deck && !error && <Loading text={loading ?? "Loading…"} />}
 
-      {deck && stage === "analyze" && <AnalyzeView deck={deck} onRegions={setRegions} onDone={finishAnalysis} />}
-
       {deck && stage === "review" && (
         <ReviewEditor
+          deckId={id}
           deck={deck}
+          planned={Boolean(detail?.plan)}
           initialIndex={startSlide}
           onRegions={setRegions}
-          onDownload={() => downloadFile(buildFile(deck.name, deck.hash, deck.slides))}
-          onImport={importRegions}
           onPresent={present}
         />
       )}

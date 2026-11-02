@@ -114,16 +114,59 @@ check, which doesn't work with TypeScript 7. Vercel still bundles the server.
    file is stored in the matter, and each slide is rendered to an image in the browser, with `@silurus/ooxml` for
    PowerPoint and pdf.js for PDF. Slides hidden in PowerPoint are left out and animations show their final state.
    Fonts that aren't embedded or available fall back to substitutes (Carlito for Calibri, from Google Fonts). Older
-   `.ppt` files and password-protected decks aren't supported. If you drop a `.regions.json` alongside it,
-   analysis is skipped.
-2. **Analyze**: each slide image goes to `POST /api/analyze`, which asks Claude (`VISION_MODEL`, default
-   `claude-opus-5-5`, structured JSON output) for 3–8 regions with a label, description, 5–10 spoken keywords and a bounding box. The response is
-   validated with zod, boxes are clamped to the slide, and an invalid answer is retried once with the error fed back.
-   Two slides are analyzed at a time. Slides that already have regions are skipped, so you can leave and come back.
-3. **Review**: drag boxes to move them, pull corners to resize, drag on empty space (or press `N`) to draw, `Del` to
-   delete, and edit labels/keywords in the side panel. Changes save automatically. **Download regions** still exports a
-   versioned JSON file (with a SHA-256 of the deck file) for use elsewhere. You get a warning if it doesn't match the deck.
+   `.ppt` files and password-protected decks aren't supported.
+2. **Add cues** in Review: drag on a slide to mark something, then give it a label and a cue type in the popup. A box
+   you don't name disappears. Drag boxes to move them, pull corners to resize, and press `Del` to remove one. Or press
+   **Suggest cues** to have Claude read the whole deck and propose them. Changes save automatically.
+3. **Check** the cues while presenting, or adjust them in Review.
 4. **Present**: full-screen slide, continuous speech recognition, automatic zoom.
+
+## Plans and analysis
+
+`shared/plans.ts` defines what each plan uses, and `PRODUCER_PLAN` picks one. There are no accounts yet, so the whole app
+runs on a single plan.
+
+| | Free | Premium (default) |
+|---|---|---|
+| Model | Sonnet 5.5, medium effort | Opus 5.5, high effort per slide, xhigh for the plan |
+| Suggest cues | Each slide on its own | Whole-deck director, then each planned slide |
+| While presenting | Any region can fire on keywords | Guided: overview, evidence and order |
+
+**The director** (`POST /api/decks/:id/plan`) sends every slide at low resolution in one request, sized to stay under
+Vercel's 4.5 MB limit. Claude decides what each slide is for and what deserves emphasis, usually 1 to 3 items and none on
+title or simple slides, picks `outline` or `zoom` for each, and puts them in speaking order. The per-slide pass then finds
+exactly those items and writes the phrases a presenter would say. A slide with nothing planned makes no Claude call. If
+planning fails, slides are analyzed one at a time.
+
+**Cue types:** Outline, Spotlight (dims the rest), Zoom, Highlight (a marker sweep over each line of text), Callout (an
+outline plus the label), Arrow, and Reveal (hidden until the presenter reaches it). `client/src/components/CueOverlay.tsx`
+draws them.
+
+**PowerPoint files state a lot outright**, so reading it costs nothing: `renderPptx` collects each slide's speaker notes
+and exact text boxes (`SlideFacts`). Claude reads slide images as usual and gets these alongside, so its plan follows the
+notes and its boxes match the real text. PDFs and scans have no such data, so boxes there are estimates.
+
+**Analysis depth follows the cue.** `CUE_EFFORT` in `shared/plans.ts` sets how hard Claude thinks about a drawn cue: low
+for cues that only need to know how the area will be referred to, medium for Zoom, Callout and Highlight. Highlight lines
+(`findLines`) and Reveal covers come from the slide image in the browser, with no API call.
+
+**Cues** come from dragging on a slide in Review or from **Suggest cues**, which only fills slides that have no cues, so
+anything you drew stays. The popup asks for just a label and a cue type, and a box you leave unnamed disappears without being saved. Once a cue
+has a label, Claude reads the marked area in the background (`POST /api/analyze/region`) to work out its keywords and
+phrases, about a cent per cue, and does it again if the box moves.
+
+**Guided slides** are any slide whose regions have a cue (`client/src/engine/guidance.ts`). Nothing can fire during the
+overview, and words spoken then don't count afterward. After that only the next step can fire, and it needs two words
+unique to that region, or one word plus a lead-in like "if you look at". Saying one of a region's own phrases fires it
+in any order, so going back or skipping ahead works.
+
+**Timings tune themselves.** `tuneForSlide` (`client/src/engine/tune.ts`) sets them per slide from what's on it and the
+presenter's measured pace: a longer overview for fuller slides, more hold time for bigger regions, and a longer
+transcript window for slower speakers. The debug panel's sliders remain as a developer tool.
+
+**Usage:** every billed Claude call is saved with its real token counts and cost, including retries and failures
+(`producer.analysis_usage`, kept after a deck is deleted). It isn't shown in the app; `GET /api/decks/:id/usage` returns a
+deck's total. Prices live in `shared/plans.ts`.
 
 ## Present controls
 
@@ -231,6 +274,6 @@ supabase/migrations/      the `producer` schema
 scripts/make-sample.ts    pdfkit sample deck + exact regions
 client/src/engine/        pure matching / restraint / zoom logic + tests
 client/src/speech/        SpeechSource interface, Web Speech + scripted implementations
-client/src/components/    Home, Matter, Deck (Analyze → Review → Present), Run, Debug panel
+client/src/components/    Home, Matter, Deck (Review → Present), Run, Debug panel
 client/src/lib/           api client, hash router, deck upload/cache, PDF and PowerPoint rendering
 ```
