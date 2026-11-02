@@ -1,9 +1,12 @@
 import * as pdfjs from "pdfjs-dist";
+import type { SlideFacts } from "../../../shared/schema";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export interface SlideImage {
+  /** what a PowerPoint file states about the slide; PDFs don't have this */
+  facts?: SlideFacts;
   index: number;
   /** JPEG data URL, ~1600px wide */
   url: string;

@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { createSampleMatter } from "../lib/deck";
 import { plural, relTime } from "../lib/format";
 import { go } from "../lib/router";
-import { Loading, NewMatterButton, RunList, TopBar } from "./Chrome";
+import { Loading, NewMatterButton, TopBar } from "./Chrome";
 
 export default function HomeView() {
   const [data, setData] = useState<HomeData | null>(null);
@@ -15,7 +15,7 @@ export default function HomeView() {
     api
       .home()
       .then(setData)
-      .catch((e) => setError(`The Producer server isn't reachable (${e instanceof Error ? e.message : e}). Start it with npm run dev.`));
+      .catch((e) => setError(`The Stage server isn't reachable (${e instanceof Error ? e.message : e}). Start it with npm run dev.`));
   }, []);
 
   const trySample = async () => {
@@ -50,7 +50,7 @@ export default function HomeView() {
               <NewMatterButton className="card card-new">
                 <span className="plus">+</span>
                 <span>New matter</span>
-                <span className="hint">A home for one project's presentations and their run history</span>
+                <span className="hint">A home for one project's presentations</span>
               </NewMatterButton>
               {data.matters.map((m) => (
                 <a key={m.id} className="card" href={`#/m/${m.id}`}>
@@ -64,7 +64,7 @@ export default function HomeView() {
                   <div className="card-body">
                     <div className="card-title">{m.name}</div>
                     <div className="hint">
-                      {plural(m.deckCount, "presentation")} · {plural(m.runCount, "run")}
+                      {plural(m.deckCount, "presentation")}
                     </div>
                     <div className="hint">Updated {relTime(m.updatedAt).toLowerCase()}</div>
                   </div>
@@ -85,14 +85,6 @@ export default function HomeView() {
                 )}
               </div>
             )}
-
-            <section className="section">
-              <div className="section-head">
-                <h2 className="display">Recent runs</h2>
-                <span className="hint">Every time you present, across all matters</span>
-              </div>
-              <RunList runs={data.runs} showMatter empty="No runs yet. They show up here after you present a deck." />
-            </section>
           </>
         )}
       </main>

@@ -1,15 +1,17 @@
 import express, { type Response } from "express";
 import { z } from "zod";
-import { DeckCreateSchema, DeckPatchSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
-import { UploadMissingError, type Library } from "./store.ts";
+import { DeckCreateSchema, DeckModeSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
+import { MatterFullError, UploadMissingError, type Library } from "./store.ts";
 
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const NameBody = z.object({ name: MatterSchema.shape.name });
+const NewMatterBody = NameBody.extend({ deckMode: DeckModeSchema.default("multiple") });
 
 const notFound = (res: Response, what: string) => res.status(404).json({ error: `${what} not found` });
 const badRequest = (res: Response, error: z.ZodError) =>
   res.status(400).json({ error: error.issues[0]?.message ?? "Invalid request" });
 
-/** /api routes for matters, decks (PDF + regions + thumbnail) and presentation runs. */
+/** /api routes for matters, decks (file + regions + thumbnail) and presentation runs. */
 export function libraryRouter(store: Library) {
   const r = express.Router();
 
@@ -20,9 +22,9 @@ export function libraryRouter(store: Library) {
   /* ---------- matters ---------- */
 
   r.post("/matters", async (req, res) => {
-    const body = NameBody.safeParse(req.body);
+    const body = NewMatterBody.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    res.status(201).json(await store.createMatter(body.data.name));
+    res.status(201).json(await store.createMatter(body.data.name, body.data.deckMode));
   });
 
   r.get("/matters/:id", async (req, res) => {
@@ -46,11 +48,18 @@ export function libraryRouter(store: Library) {
 
   /* ---------- decks ---------- */
 
-  // A new deck: get an upload url, PUT the PDF there, then register it with POST /matters/:id/decks.
+  // A new deck: get an upload url, PUT the file there, then register it with POST /matters/:id/decks.
   r.post("/matters/:id/decks/upload", async (req, res) => {
-    const upload = await store.prepareUpload(req.params.id);
-    if (!upload) return void notFound(res, "Matter");
-    res.status(201).json(upload);
+    const body = DeckUploadRequestSchema.safeParse(req.body);
+    if (!body.success) return void badRequest(res, body.error);
+    try {
+      const upload = await store.prepareUpload(req.params.id, body.data.format);
+      if (!upload) return void notFound(res, "Matter");
+      res.status(201).json(upload);
+    } catch (e) {
+      if (!(e instanceof MatterFullError)) throw e;
+      res.status(409).json({ error: e.message });
+    }
   });
 
   r.post("/matters/:id/decks", async (req, res) => {
@@ -67,8 +76,8 @@ export function libraryRouter(store: Library) {
   });
 
   // Local storage only; with Supabase the upload url points straight at Storage.
-  r.put("/uploads/:deckId", express.raw({ type: "application/pdf", limit: "200mb" }), async (req, res) => {
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return void res.status(400).json({ error: "Body must be a PDF" });
+  r.put("/uploads/:deckId", express.raw({ type: ["application/pdf", PPTX_MIME], limit: "200mb" }), async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return void res.status(400).json({ error: "Body must be a PDF or PowerPoint file" });
     if (!(await store.receiveUpload?.(req.params.deckId, req.body))) return void notFound(res, "Upload");
     res.status(204).end();
   });
@@ -87,16 +96,20 @@ export function libraryRouter(store: Library) {
     res.json(d);
   });
 
+  r.get("/decks/:id/usage", async (req, res) => {
+    res.json(await store.deckUsage(req.params.id));
+  });
+
   r.delete("/decks/:id", async (req, res) => {
     if (!(await store.deleteDeck(req.params.id))) return void notFound(res, "Presentation");
     res.status(204).end();
   });
 
-  r.get("/decks/:id/pdf", async (req, res) => {
-    const pdf = await store.pdf(req.params.id);
-    if (!pdf) return void notFound(res, "Presentation");
-    if ("url" in pdf) return void res.redirect(pdf.url);
-    res.type("application/pdf").send(pdf.data);
+  r.get("/decks/:id/file", async (req, res) => {
+    const file = await store.deckFile(req.params.id);
+    if (!file) return void notFound(res, "Presentation");
+    if ("url" in file) return void res.redirect(file.url);
+    res.type("application/octet-stream").send(file.data);
   });
 
   r.put("/decks/:id/thumb", express.raw({ type: "image/jpeg", limit: "5mb" }), async (req, res) => {

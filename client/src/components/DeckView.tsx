@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeckDetail, Region, RunInput, Slide } from "../../../shared/schema";
 import { api } from "../lib/api";
-import { cacheImages, cachedImages, takeNotices, type Deck } from "../lib/deck";
-import { buildFile, downloadFile, parseRegionsFile } from "../lib/fileIO";
-import { duration } from "../lib/format";
-import { renderPdf } from "../lib/pdf";
-import AnalyzeView from "./AnalyzeView";
+import { cacheImages, cachedImages, renderDeck, takeNotices, type Deck } from "../lib/deck";
+import { deckTitle } from "../lib/format";
 import { Loading, TopBar } from "./Chrome";
 import PresentView from "./PresentView";
 import ReviewEditor from "./ReviewEditor";
 
-type Stage = "analyze" | "review" | "present";
+type Stage = "review" | "present";
 type SaveState = "saved" | "saving" | "error";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -26,7 +23,6 @@ export default function DeckView({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
-  const [lastRun, setLastRun] = useState<{ id: string; ms: number } | null>(null);
   /** last slides the server has; pending = waiting to be sent */
   const saved = useRef<Slide[] | null>(null);
   const pending = useRef<Slide[] | null>(null);
@@ -42,9 +38,9 @@ export default function DeckView({ id }: { id: string }) {
         setDetail(d);
         let images = cachedImages(id);
         if (!images) {
-          setLoading("Loading PDF…");
-          const bytes = await api.deckPdf(id);
-          images = await renderPdf(bytes, (done, total) => alive && setLoading(`Rendering slide ${done} of ${total}…`));
+          setLoading("Loading presentation…");
+          const bytes = await api.deckFile(id);
+          images = await renderDeck(bytes, (done, total) => alive && setLoading(`Rendering slide ${done} of ${total}…`));
           cacheImages(id, images);
         }
         if (!alive) return;
@@ -52,7 +48,6 @@ export default function DeckView({ id }: { id: string }) {
         const slides: Slide[] = images.map((_, index) => ({ index, regions: d.slides.find((s) => s.index === index)?.regions ?? [] }));
         saved.current = slides;
         setDeck({ name: d.name, hash: d.pdfHash, images, slides });
-        setStage(d.analyzed ? "review" : "analyze");
         setWarnings(takeNotices(id));
         setLoading(null);
       } catch (e) {
@@ -105,48 +100,23 @@ export default function DeckView({ id }: { id: string }) {
     setDeck((d) => d && { ...d, slides: d.slides.map((s) => (s.index === index ? { ...s, regions } : s)) });
   }, []);
 
-  const importRegions = (text: string) => {
-    if (!deck) return;
-    try {
-      const loaded = parseRegionsFile(text, deck.hash, deck.images.length);
-      setDeck({ ...deck, slides: loaded.file.slides });
-      setWarnings(loaded.warnings);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const finishAnalysis = () => {
-    setStage("review");
-    if (detail && !detail.analyzed) {
-      setDetail({ ...detail, analyzed: true });
-      api.patchDeck(id, { analyzed: true }).catch(() => {});
-    }
-  };
-
   /* ---------- presenting ---------- */
   const present = (from: number) => {
     setStartSlide(from);
     setStage("present");
-    setLastRun(null);
     // Must be called inside the click handler's user gesture.
     document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
   const onRunEnd = useCallback(
     (run: Omit<RunInput, "deckId">, unloading: boolean) => {
-      const ms = run.endedAt - run.startedAt;
-      if (ms < MIN_RUN_MS) return;
+      if (run.endedAt - run.startedAt < MIN_RUN_MS) return;
       const input = { ...run, deckId: id };
       if (unloading) {
         api.beaconRun(input);
         return;
       }
-      api
-        .saveRun(input)
-        .then(({ id: runId }) => setLastRun({ id: runId, ms }))
-        .catch((e) => setError(`Couldn't save this run: ${e instanceof Error ? e.message : e}`));
+      api.saveRun(input).catch((e) => console.error("Couldn't save this run", e));
     },
     [id],
   );
@@ -169,30 +139,17 @@ export default function DeckView({ id }: { id: string }) {
   const crumbs = [
     { label: "Matters", to: "/" },
     { label: detail?.matterName || "…", to: detail ? `/m/${detail.matterId}` : undefined },
-    { label: detail?.name.replace(/\.pdf$/i, "") ?? "…" },
+    { label: detail ? deckTitle(detail.name) : "…" },
   ];
 
   return (
     <div className="deck-page">
       <TopBar crumbs={crumbs}>
-        {lastRun && (
-          <a className="run-pill" href={`#/r/${lastRun.id}`}>
-            Run saved · {duration(lastRun.ms)} · View →
-          </a>
-        )}
         {deck && (
           <>
             <span className={`save-state ${saveState}`}>
               {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}
             </span>
-            <nav className="seg">
-              <button className={stage === "analyze" ? "on" : ""} onClick={() => setStage("analyze")}>
-                Analyze
-              </button>
-              <button className={stage === "review" ? "on" : ""} onClick={finishAnalysis}>
-                Review
-              </button>
-            </nav>
           </>
         )}
       </TopBar>
@@ -210,15 +167,13 @@ export default function DeckView({ id }: { id: string }) {
 
       {!deck && !error && <Loading text={loading ?? "Loading…"} />}
 
-      {deck && stage === "analyze" && <AnalyzeView deck={deck} onRegions={setRegions} onDone={finishAnalysis} />}
-
       {deck && stage === "review" && (
         <ReviewEditor
+          deckId={id}
           deck={deck}
+          planned={Boolean(detail?.plan)}
           initialIndex={startSlide}
           onRegions={setRegions}
-          onDownload={() => downloadFile(buildFile(deck.name, deck.hash, deck.slides))}
-          onImport={importRegions}
           onPresent={present}
         />
       )}

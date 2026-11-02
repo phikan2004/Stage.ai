@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { RunSummary } from "../../../shared/schema";
 import { api } from "../lib/api";
-import { dateTime, duration, relTime } from "../lib/format";
 import { go } from "../lib/router";
 
 export interface Crumb {
@@ -13,7 +11,7 @@ export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?:
   return (
     <header className="topbar">
       <a className="brand" href="#/">
-        Producer<span className="brand-dot">.</span>
+        Stage<span className="brand-dot">.</span>
       </a>
       {crumbs.length > 0 && (
         <nav className="crumbs">
@@ -30,41 +28,13 @@ export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?:
   );
 }
 
-export function RunList({ runs, showMatter, empty }: { runs: RunSummary[]; showMatter?: boolean; empty: ReactNode }) {
-  if (runs.length === 0) return <div className="empty-row">{empty}</div>;
-  return (
-    <div className="runs" role="table">
-      <div className="run-row head" role="row">
-        <span>When</span>
-        <span>Presentation</span>
-        <span className="num">Length</span>
-        <span className="num">Slides</span>
-        <span className="num">Zooms</span>
-      </div>
-      {runs.map((r) => (
-        <a key={r.id} className="run-row" role="row" href={`#/r/${r.id}`}>
-          <span title={dateTime(r.startedAt)}>{relTime(r.startedAt)}</span>
-          <span className="run-name">
-            {r.deckName.replace(/\.pdf$/i, "")}
-            {showMatter && <span className="hint"> · {r.matterName}</span>}
-          </span>
-          <span className="num">{duration(r.stats.durationMs)}</span>
-          <span className="num">
-            {r.stats.slidesVisited}/{r.slideCount}
-          </span>
-          <span className="num">{r.stats.zooms}</span>
-        </a>
-      ))}
-    </div>
-  );
-}
-
 /** Small modal asking for one name. */
 export function NameDialog({
   title,
   label,
   initial = "",
   submitLabel,
+  children,
   onSubmit,
   onClose,
 }: {
@@ -72,6 +42,7 @@ export function NameDialog({
   label: string;
   initial?: string;
   submitLabel: string;
+  children?: ReactNode;
   onSubmit: (name: string) => Promise<void>;
   onClose: () => void;
 }) {
@@ -107,6 +78,7 @@ export function NameDialog({
           <span className="micro">{label}</span>
           <input ref={input} className="field" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </label>
+        {children}
         {error && <div className="banner err">{error}</div>}
         <div className="dialog-actions">
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -123,6 +95,7 @@ export function NameDialog({
 
 export function NewMatterButton({ className, children }: { className?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [multiple, setMultiple] = useState(false);
   return (
     <>
       <button className={className} onClick={() => setOpen(true)}>
@@ -135,10 +108,26 @@ export function NewMatterButton({ className, children }: { className?: string; c
           submitLabel="Create matter"
           onClose={() => setOpen(false)}
           onSubmit={async (name) => {
-            const m = await api.createMatter(name);
+            const m = await api.createMatter(name, multiple ? "multiple" : "single");
             go(`/m/${m.id}`);
           }}
-        />
+        >
+          <div className="deck-mode">
+            <span className="micro">Presentations</span>
+            <div className="deck-mode-row">
+              <span className={multiple ? "" : "on"}>One</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={multiple}
+                aria-label="More than one presentation"
+                className={`switch ${multiple ? "on" : ""}`}
+                onClick={() => setMultiple(!multiple)}
+              />
+              <span className={multiple ? "on" : ""}>More than one</span>
+            </div>
+          </div>
+        </NameDialog>
       )}
     </>
   );

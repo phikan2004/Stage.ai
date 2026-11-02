@@ -16,6 +16,9 @@ export interface ProducerConfig {
   minDwellMs: number;
   noMatchTimeoutMs: number;
   cooldownMs: number;
+  // guided slides; worked out per slide by tuneForSlide
+  overviewMs: number;
+  minHits: number;
   // rendering
   zoomPadding: number;
   maxZoom: number;
@@ -37,6 +40,8 @@ export const DEFAULT_CONFIG: ProducerConfig = {
   minDwellMs: 3000,
   noMatchTimeoutMs: 4000,
   cooldownMs: 800,
+  overviewMs: 6000,
+  minHits: 2,
   zoomPadding: 0.04,
   maxZoom: 3,
   transitionMs: 450,

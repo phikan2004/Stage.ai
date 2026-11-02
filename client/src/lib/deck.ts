@@ -1,6 +1,7 @@
-import type { Slide } from "../../../shared/schema";
+import type { Box, Slide } from "../../../shared/schema";
 import { api } from "./api";
 import { parseRegionsFile } from "./fileIO";
+import { deckFormat } from "./format";
 import { renderPdf, sha256Hex, type SlideImage } from "./pdf";
 
 /** A deck as the editor and presenter use it: rendered images plus regions. */
@@ -11,7 +12,7 @@ export interface Deck {
   slides: Slide[];
 }
 
-/* Rendering a PDF takes a few seconds, so keep the last few decks' images for this tab. */
+/* Rendering a deck takes a few seconds, so keep the last few decks' images for this tab. */
 const CACHE_SIZE = 3;
 const imageCache = new Map<string, SlideImage[]>();
 export function cacheImages(deckId: string, images: SlideImage[]) {
@@ -40,8 +41,56 @@ async function thumbnail(img: SlideImage, width = 480): Promise<Blob> {
   return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("thumbnail failed"))), "image/jpeg", 0.82));
 }
 
+/** Hosts cap a request at about 4.5 MB, and a whole deck goes up in one. */
+const PLAN_REQUEST_BYTES = 3_500_000;
+
+async function shrink(url: string, width: number, height: number): Promise<string> {
+  const el = new Image();
+  el.src = url;
+  await el.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")!.drawImage(el, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.6);
+}
+
+/** The slide with one area marked in red, so Claude sees exactly what the presenter drew. */
+export async function markRegion(img: SlideImage, box: Box, width = 1200): Promise<string> {
+  const el = new Image();
+  el.src = img.url;
+  await el.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = Math.round((width * img.height) / img.width);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#ff0000";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(box.x * canvas.width, box.y * canvas.height, box.w * canvas.width, box.h * canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+/** Every slide, small enough to send together for the director pass, which judges slides rather than measuring them. */
+export async function planImages(images: SlideImage[]): Promise<string[]> {
+  for (let width = 800; ; width = Math.round(width * 0.75)) {
+    const out = await Promise.all(images.map((img) => shrink(img.url, width, Math.round((width * img.height) / img.width))));
+    if (width < 320 || out.reduce((n, s) => n + s.length, 0) <= PLAN_REQUEST_BYTES) return out;
+  }
+}
+
+/** Render a stored or newly chosen deck file, whichever format it is. */
+export async function renderDeck(bytes: ArrayBuffer, onPage?: (done: number, total: number) => void): Promise<SlideImage[]> {
+  const format = deckFormat(bytes);
+  if (!format) throw new Error("That file isn't a PDF or a PowerPoint (.pptx) file.");
+  if (format === "pdf") return renderPdf(bytes, onPage);
+  // The PowerPoint renderer is large, so it only loads for decks that need it.
+  const { renderPptx } = await import("./pptx");
+  return renderPptx(bytes, onPage);
+}
+
 /**
- * Render a PDF, store it in the matter, and attach regions if a regions file came with it.
+ * Render a PDF or PowerPoint, store it in the matter, and attach regions if a regions file came with it.
  * Returns the new deck's id; its images are cached so opening it is instant.
  */
 export async function addDeck(
@@ -53,13 +102,13 @@ export async function addDeck(
 ): Promise<string> {
   onProgress("Rendering slides…");
   const hash = await sha256Hex(bytes);
-  const images = await renderPdf(bytes, (done, total) => onProgress(`Rendering slide ${done} of ${total}…`));
-  if (images.length === 0) throw new Error("That PDF has no pages.");
+  const images = await renderDeck(bytes, (done, total) => onProgress(`Rendering slide ${done} of ${total}…`));
+  if (images.length === 0) throw new Error("That presentation has no slides to show.");
   // Validate the regions file before uploading anything.
   const loaded = regionsText ? parseRegionsFile(regionsText, hash, images.length) : null;
 
   onProgress("Saving…");
-  const deck = await api.uploadDeck(matterId, name, bytes, hash, images.length);
+  const deck = await api.uploadDeck(matterId, name, deckFormat(bytes)!, bytes, hash, images.length);
   cacheImages(deck.id, images);
   await Promise.all([
     loaded && api.patchDeck(deck.id, { slides: loaded.file.slides, analyzed: true }),
@@ -69,15 +118,15 @@ export async function addDeck(
   return deck.id;
 }
 
-/** Split dropped/chosen files into one PDF and an optional regions JSON. */
-export async function pickFiles(files: FileList | File[]): Promise<{ pdf?: File; regions?: string }> {
-  let pdf: File | undefined;
+/** Split dropped/chosen files into one presentation and an optional regions JSON. */
+export async function pickFiles(files: FileList | File[]): Promise<{ deck?: File; regions?: string }> {
+  let deck: File | undefined;
   let regions: string | undefined;
   for (const f of Array.from(files)) {
-    if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) pdf ??= f;
+    if (/\.(pdf|pptx)$/i.test(f.name) || f.type === "application/pdf") deck ??= f;
     else if (f.name.toLowerCase().endsWith(".json")) regions = await f.text();
   }
-  return { pdf, regions };
+  return { deck, regions };
 }
 
 /** Create a "Sample" matter holding the bundled sample deck. */
