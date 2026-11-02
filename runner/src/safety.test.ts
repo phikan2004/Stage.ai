@@ -12,6 +12,12 @@ describe("allowlist", () => {
     expect(appAllowed(limits, "Mail", "com.apple.mail")).toBe(false);
   });
 
+  it("never allows Claude or system apps, even if a show lists them", () => {
+    const listed: Limits = { ...limits, apps: ["Claude", "System Settings", "com.anthropic.claudefordesktop"] };
+    expect(appAllowed(listed, "Claude", "com.anthropic.claudefordesktop")).toBe(false);
+    expect(appAllowed(listed, "System Settings", "com.apple.systempreferences")).toBe(false);
+  });
+
   it("matches whole origins, not lookalikes", () => {
     expect(originAllowed(limits, "http://localhost:5173/#/m/1")).toBe(true);
     expect(originAllowed(limits, "about:blank")).toBe(true);

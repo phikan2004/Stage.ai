@@ -1,6 +1,6 @@
 import express, { type Response } from "express";
 import { z } from "zod";
-import { DeckCreateSchema, DeckModeSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema } from "../../shared/schema.ts";
+import { DeckCreateSchema, DeckModeSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema, ShowPatchSchema } from "../../shared/schema.ts";
 import { MatterFullError, UploadMissingError, type Library } from "./store.ts";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -143,6 +143,41 @@ export function libraryRouter(store: Library) {
 
   r.delete("/runs/:id", async (req, res) => {
     if (!(await store.deleteRun(req.params.id))) return void notFound(res, "Run");
+    res.status(204).end();
+  });
+
+  /* ---------- shows ---------- */
+
+  r.get("/matters/:id/shows", async (req, res) => {
+    const shows = await store.shows(req.params.id);
+    if (!shows) return void notFound(res, "Matter");
+    res.json(shows);
+  });
+
+  r.post("/matters/:id/shows", async (req, res) => {
+    const body = NameBody.safeParse(req.body);
+    if (!body.success) return void badRequest(res, body.error);
+    const show = await store.createShow(req.params.id, body.data.name);
+    if (!show) return void notFound(res, "Matter");
+    res.status(201).json(show);
+  });
+
+  r.get("/shows/:id", async (req, res) => {
+    const show = await store.show(req.params.id);
+    if (!show) return void notFound(res, "Show");
+    res.json(show);
+  });
+
+  r.patch("/shows/:id", async (req, res) => {
+    const body = ShowPatchSchema.safeParse(req.body);
+    if (!body.success) return void badRequest(res, body.error);
+    const show = await store.patchShow(req.params.id, body.data);
+    if (!show) return void notFound(res, "Show");
+    res.json(show);
+  });
+
+  r.delete("/shows/:id", async (req, res) => {
+    if (!(await store.deleteShow(req.params.id))) return void notFound(res, "Show");
     res.status(204).end();
   });
 

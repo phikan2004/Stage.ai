@@ -11,6 +11,8 @@ export interface Model {
   turn(messages: MessageParam[], signal: AbortSignal): Promise<Message>;
 }
 
+export type { ContentParam };
+
 export type BeatEvent =
   | { type: "looking" }
   | { type: "armed"; actions: string[] }
@@ -21,6 +23,8 @@ export type BeatEvent =
 
 export interface BeatOptions {
   goal: string;
+  /** What the operator already knows about this beat, ahead of the live screen. */
+  context?: ContentParam[];
   driver: Driver;
   model: Model;
   limits: Limits;
@@ -39,6 +43,8 @@ export interface BeatOptions {
   pollMs?: number;
   /** ms for the screen to settle after a batch of actions */
   settleMs?: number;
+  /** ms between actions, so the audience can follow */
+  actionGapMs?: () => number;
 }
 
 export interface BeatReport {
@@ -232,7 +238,8 @@ export async function runBeat(o: BeatOptions): Promise<BeatReport> {
   async function execute(calls: ToolUse[], view: View, refused: Map<string, string>): Promise<ContentParam[]> {
     const out: ContentParam[] = [];
     let failed = false;
-    for (const call of calls) {
+    for (const [i, call] of calls.entries()) {
+      if (i > 0 && !failed && o.actionGapMs) await sleep(o.actionGapMs());
       if (failed) {
         out.push(result(call, NOT_RUN, true));
         continue;
@@ -263,7 +270,7 @@ export async function runBeat(o: BeatOptions): Promise<BeatReport> {
     }
     o.onEvent?.({ type: "looking" });
     let view = await driver.look();
-    const messages: MessageParam[] = [{ role: "user", content: [{ type: "text", text: `Goal for this beat: ${o.goal}` }, ...viewBlocks(view)] }];
+    const messages: MessageParam[] = [{ role: "user", content: [{ type: "text", text: `Goal for this beat: ${o.goal}` }, ...(o.context ?? []), ...viewBlocks(view)] }];
 
     while (true) {
       const res = await Promise.race([model.turn(messages, ctl.signal), stopped]);

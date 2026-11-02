@@ -8,9 +8,24 @@ export interface ConsoleServer {
   close(): void;
 }
 
-/** The link to the Stage console. Binds to this computer only, and takes one known origin plus a per-launch token. */
-export function startConsoleServer(opts: { port: number; origins: string[]; token: string; onMessage: (msg: any) => void }): Promise<ConsoleServer> {
-  const http = createServer((_req, res) => res.writeHead(426).end());
+/** The link to the Stage console. Binds to this computer only, and takes one known origin plus a pairing token. */
+export function startConsoleServer(opts: {
+  port: number;
+  origins: string[];
+  token: string;
+  onMessage: (msg: any) => void;
+  onConnect?: () => void;
+  /** A recording's frame by path, for the console's thumbnails. */
+  frame?: (path: string) => Promise<Buffer | null>;
+}): Promise<ConsoleServer> {
+  const http = createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const m = /^\/frames\/(.+)$/.exec(url.pathname);
+    if (!m || url.searchParams.get("token") !== opts.token) return void res.writeHead(404).end();
+    const jpeg = await opts.frame?.(m[1]);
+    if (!jpeg) return void res.writeHead(404).end();
+    res.writeHead(200, { "content-type": "image/jpeg" }).end(jpeg);
+  });
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
 
@@ -22,6 +37,7 @@ export function startConsoleServer(opts: { port: number; origins: string[]; toke
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.add(ws);
+      opts.onConnect?.();
       ws.on("close", () => clients.delete(ws));
       ws.on("message", (data) => {
         try {

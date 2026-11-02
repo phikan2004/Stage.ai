@@ -158,6 +158,17 @@ describe("computer toolset results", () => {
   });
 });
 
+describe("pacing", () => {
+  it("waits between actions, and not before the first", async () => {
+    const d = fakeDriver();
+    const { model } = script(reply([call("a", "click_element", { ref: "e1" }), call("b", "click_element", { ref: "e1" })]));
+    let gaps = 0;
+    await runBeat(options(d, model, { actionGapMs: () => (gaps++, 0) }));
+    expect(gaps).toBe(1);
+    expect(d.log).toHaveLength(2);
+  });
+});
+
 describe("limits", () => {
   it("asks before a risky click, at hold time, and a no leaves it undone", async () => {
     const d = fakeDriver();

@@ -15,7 +15,8 @@ dotenv.config({ path: join(root, ".env"), quiet: true, override: true });
 // Supabase when configured, otherwise a local JSON store in data/.
 async function openLibrary(): Promise<Library> {
   const env = process.env;
-  if (env.DATABASE_URL || env.SUPABASE_URL) {
+  // PRODUCER_STORE=file keeps a local run away from the configured Supabase project.
+  if (env.PRODUCER_STORE !== "file" && (env.DATABASE_URL || env.SUPABASE_URL)) {
     const s = SupabaseStore.fromEnv(env);
     await s.check();
     return s;
@@ -133,7 +134,8 @@ app.post("/api/stt/session", async (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 8787;
-app.listen(port, () => {
+app.listen(port, (err) => {
+  if (err) throw err;
   const k = (v?: string) => (v ? "set" : "MISSING");
   console.log(
     `Stage API on http://localhost:${port} (Claude key ${k(process.env.ANTHROPIC_API_KEY)}, Deepgram key ${k(process.env.DEEPGRAM_API_KEY)}, data in ${store.where})`,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DeckSummary, MatterDetail } from "../../../shared/schema";
+import type { DeckSummary, MatterDetail, Show } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { addDeck, pickFiles } from "../lib/deck";
 import { dateTime, deckTitle, plural } from "../lib/format";
@@ -10,6 +10,13 @@ export default function MatterView({ id }: { id: string }) {
   const [data, setData] = useState<MatterDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [addingShow, setAddingShow] = useState(false);
+  // Separate from the matter, so shows being unavailable can't take the page down.
+  const [shows, setShows] = useState<Show[] | null>(null);
+
+  useEffect(() => {
+    api.shows(id).then(setShows).catch(() => setShows(null));
+  }, [id]);
 
   const load = useCallback(
     () =>
@@ -75,9 +82,50 @@ export default function MatterView({ id }: { id: string }) {
                 ))}
               </div>
             </section>
+
+            {shows && (
+              <section className="section">
+                <div className="section-head">
+                  <h2 className="display">Shows</h2>
+                  <span className="hint">Demos the Stage operator performs live</span>
+                </div>
+                <div className="cards">
+                  <button className="card card-new" onClick={() => setAddingShow(true)}>
+                    <span className="plus">+</span>
+                    <span>New show</span>
+                    <span className="hint">Do the demo once while talking through it. The AI learns it.</span>
+                  </button>
+                  {shows.map((s) => (
+                    <a key={s.id} className="card" href={`#/s/${s.id}`}>
+                      <div className="card-img">
+                        <span className="monogram display">{s.beats.length}</span>
+                      </div>
+                      <div className="card-body">
+                        <div className="card-title">{s.name}</div>
+                        <div className="hint">{s.beats.length ? plural(s.beats.length, "beat") : "Not taught yet"}</div>
+                        <div className="hint">{s.dryRuns.length ? plural(s.dryRuns.length, "dry run") : "No dry runs yet"}</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
       </main>
+      {addingShow && (
+        <NameDialog
+          title="New show"
+          label="Name"
+          initial=""
+          submitLabel="Create"
+          onClose={() => setAddingShow(false)}
+          onSubmit={async (n) => {
+            const show = await api.createShow(id, n);
+            go(`/s/${show.id}`);
+          }}
+        />
+      )}
       {renaming && data && (
         <NameDialog
           title="Rename matter"
