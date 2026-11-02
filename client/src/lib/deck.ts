@@ -1,4 +1,4 @@
-import type { Slide } from "../../../shared/schema";
+import type { Box, Slide } from "../../../shared/schema";
 import { api } from "./api";
 import { parseRegionsFile } from "./fileIO";
 import { deckFormat } from "./format";
@@ -39,6 +39,44 @@ async function thumbnail(img: SlideImage, width = 480): Promise<Blob> {
   canvas.height = Math.round((width * img.height) / img.width);
   canvas.getContext("2d")!.drawImage(el, 0, 0, canvas.width, canvas.height);
   return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("thumbnail failed"))), "image/jpeg", 0.82));
+}
+
+/** Hosts cap a request at about 4.5 MB, and a whole deck goes up in one. */
+const PLAN_REQUEST_BYTES = 3_500_000;
+
+async function shrink(url: string, width: number, height: number): Promise<string> {
+  const el = new Image();
+  el.src = url;
+  await el.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d")!.drawImage(el, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.6);
+}
+
+/** The slide with one area marked in red, so Claude sees exactly what the presenter drew. */
+export async function markRegion(img: SlideImage, box: Box, width = 1200): Promise<string> {
+  const el = new Image();
+  el.src = img.url;
+  await el.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = Math.round((width * img.height) / img.width);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#ff0000";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(box.x * canvas.width, box.y * canvas.height, box.w * canvas.width, box.h * canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+/** Every slide, small enough to send together for the director pass, which judges slides rather than measuring them. */
+export async function planImages(images: SlideImage[]): Promise<string[]> {
+  for (let width = 800; ; width = Math.round(width * 0.75)) {
+    const out = await Promise.all(images.map((img) => shrink(img.url, width, Math.round((width * img.height) / img.width))));
+    if (width < 320 || out.reduce((n, s) => n + s.length, 0) <= PLAN_REQUEST_BYTES) return out;
+  }
 }
 
 /** Render a stored or newly chosen deck file, whichever format it is. */

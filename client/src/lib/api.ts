@@ -1,9 +1,13 @@
 import type {
+  Cue,
   DeckDetail,
   DeckFormat,
+  DeckMode,
   DeckPatch,
+  DeckPlan,
   DeckRecord,
   DeckUpload,
+  RegionDetails,
   HomeData,
   Matter,
   MatterDetail,
@@ -11,6 +15,7 @@ import type {
   RunInput,
   Show,
   ShowPatch,
+  SlideFacts,
 } from "../../../shared/schema";
 
 async function json<T>(res: Response): Promise<T> {
@@ -41,7 +46,7 @@ export const api = {
   patchShow: (id: string, patch: ShowPatch) => fetch(`/api/shows/${id}`, send("PATCH", patch)).then(json<Show>),
   deleteShow: (id: string) => fetch(`/api/shows/${id}`, send("DELETE")).then(json<void>),
 
-  createMatter: (name: string) => fetch("/api/matters", send("POST", { name })).then(json<Matter>),
+  createMatter: (name: string, deckMode: DeckMode = "multiple") => fetch("/api/matters", send("POST", { name, deckMode })).then(json<Matter>),
   matter: (id: string) => fetch(`/api/matters/${id}`).then(json<MatterDetail>),
   renameMatter: (id: string, name: string) => fetch(`/api/matters/${id}`, send("PATCH", { name })).then(json<Matter>),
   deleteMatter: (id: string) => fetch(`/api/matters/${id}`, send("DELETE")).then(json<void>),
@@ -57,6 +62,10 @@ export const api = {
   /** keepalive lets a save started during unload finish (bodies up to 64 KB). */
   patchDeck: (id: string, patch: DeckPatch, keepalive = false) =>
     fetch(`/api/decks/${id}`, send("PATCH", patch, { keepalive })).then(json<DeckRecord>),
+  planDeck: (id: string, images: string[], facts: SlideFacts[] | undefined, signal?: AbortSignal) =>
+    fetch(`/api/decks/${id}/plan`, send("POST", { images, facts }, { signal })).then(json<DeckPlan>),
+  describeRegion: (deckId: string, slideIndex: number, label: string, cue: Cue, image: string, notes?: string) =>
+    fetch("/api/analyze/region", send("POST", { image, label, cue, deckId, slideIndex, notes })).then(json<RegionDetails>),
   deleteDeck: (id: string) => fetch(`/api/decks/${id}`, send("DELETE")).then(json<void>),
   deckFile: async (id: string) => {
     const res = await fetch(`/api/decks/${id}/file`);

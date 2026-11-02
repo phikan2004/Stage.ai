@@ -5,9 +5,13 @@ import {
   normalizeRegions,
   summarizeRun,
   type DeckCreate,
+  type Box,
+  type Cue,
   type DeckDetail,
   type DeckFormat,
+  type DeckMode,
   type DeckPatch,
+  type DeckPlan,
   type DeckRecord,
   type DeckSummary,
   type DeckUpload,
@@ -23,8 +27,10 @@ import {
   type Show,
   type ShowPatch,
   type Slide,
+  type UsageEntry,
+  type UsageSummary,
 } from "../../shared/schema.ts";
-import { UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
+import { MatterFullError, UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
 
 /** Where deck files and thumbnails go. Supabase Storage in production; swappable for tests. */
 export interface BlobStore {
@@ -86,6 +92,7 @@ const deckPathFor = (deckId: string, format: DeckFormat) => `${deckId}/deck.${fo
 interface MatterRow {
   id: string;
   name: string;
+  deck_mode: DeckMode;
   created_at: Date;
   updated_at: Date;
 }
@@ -96,6 +103,7 @@ interface DeckRow {
   pdf_hash: string;
   slide_count: number;
   analyzed: boolean;
+  plan: DeckPlan | null;
   pdf_path: string;
   thumb_path: string | null;
   created_at: Date;
@@ -107,6 +115,9 @@ interface RegionRow {
   label: string;
   description: string;
   keywords: string[];
+  cue: Cue | null;
+  phrases: string[];
+  marks: Box[] | null;
   box_x: number;
   box_y: number;
   box_w: number;
@@ -133,12 +144,13 @@ interface EventRow {
   slide_index: number;
   region_key: string | null;
   label: string | null;
+  cue: Cue | null;
   command: string | null;
   text: string | null;
   simulated: boolean;
 }
 
-const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
+const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, deckMode: r.deck_mode, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
 
 function toDeckBase(r: DeckRow): Omit<DeckRecord, "slides"> {
   return {
@@ -148,6 +160,7 @@ function toDeckBase(r: DeckRow): Omit<DeckRecord, "slides"> {
     pdfHash: r.pdf_hash,
     slideCount: r.slide_count,
     analyzed: r.analyzed,
+    plan: r.plan,
     hasThumb: r.thumb_path !== null,
     createdAt: ms(r.created_at)!,
     updatedAt: ms(r.updated_at)!,
@@ -163,6 +176,9 @@ function toSlides(slideCount: number, rows: RegionRow[]): Slide[] {
       description: r.description,
       keywords: r.keywords,
       box: { x: r.box_x, y: r.box_y, w: r.box_w, h: r.box_h },
+      ...(r.cue ? { cue: r.cue } : {}),
+      ...(r.phrases.length ? { phrases: r.phrases } : {}),
+      ...(r.marks ? { marks: r.marks } : {}),
     });
   }
   return slides;
@@ -195,7 +211,7 @@ function toEvent(e: EventRow): RunEvent {
     case "slide":
       return { ...base, type: "slide" };
     case "zoom":
-      return { ...base, type: "zoom", regionId: e.region_key ?? "", label: e.label ?? "" };
+      return { ...base, type: "zoom", regionId: e.region_key ?? "", label: e.label ?? "", ...(e.cue ? { cue: e.cue } : {}) };
     case "command":
       return { ...base, type: "command", command: e.command ?? "", text: e.text ?? "" };
     case "heard":
@@ -214,6 +230,9 @@ function regionRows(slides: Slide[], slideCount: number) {
         label: r.label.trim().slice(0, 200) || "Region",
         description: r.description,
         keywords: r.keywords,
+        cue: r.cue ?? null,
+        phrases: r.phrases ?? [],
+        marks: r.marks ?? null,
         box_x: r.box.x,
         box_y: r.box.y,
         box_w: r.box.w,
@@ -387,8 +406,8 @@ export class SupabaseStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string): Promise<Matter> {
-    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name) values (${name}) returning *`;
+  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
+    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name, deck_mode) values (${name}, ${deckMode}) returning *`;
     return toMatter(m);
   }
 
@@ -410,8 +429,11 @@ export class SupabaseStore implements Library {
 
   async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
     if (!isId(matterId)) return null;
-    const [exists] = await this.sql`select 1 from producer.matters where id = ${matterId}`;
-    if (!exists) return null;
+    const [matter] = await this.sql<{ deck_mode: DeckMode; has_deck: boolean }[]>`
+      select deck_mode, exists (select 1 from producer.decks d where d.matter_id = m.id) as has_deck
+      from producer.matters m where id = ${matterId}`;
+    if (!matter) return null;
+    if (matter.deck_mode === "single" && matter.has_deck) throw new MatterFullError();
     const deckId = randomUUID();
     return { deckId, url: await this.blobs.uploadUrl(deckPathFor(deckId, format)) };
   }
@@ -440,7 +462,8 @@ export class SupabaseStore implements Library {
       const [d] = await tx<DeckRow[]>`
         update producer.decks set
           name = coalesce(${patch.name ?? null}, name),
-          analyzed = coalesce(${patch.analyzed ?? null}, analyzed)
+          analyzed = coalesce(${patch.analyzed ?? null}, analyzed),
+          plan = coalesce(${patch.plan ? tx.json(patch.plan) : null}::jsonb, plan)
         where id = ${id} returning *`;
       if (!d) return null;
       if (patch.slides) {
@@ -450,12 +473,12 @@ export class SupabaseStore implements Library {
         if (rows.length) {
           await tx`
             insert into producer.regions
-              (deck_id, slide_index, position, region_key, label, description, keywords, box_x, box_y, box_w, box_h)
-            select ${id}, x.slide_index, x.position, x.region_key, x.label, x.description, x.keywords,
+              (deck_id, slide_index, position, region_key, label, description, keywords, cue, phrases, marks, box_x, box_y, box_w, box_h)
+            select ${id}, x.slide_index, x.position, x.region_key, x.label, x.description, x.keywords, x.cue, x.phrases, x.marks,
                    x.box_x, x.box_y, x.box_w, x.box_h
             from jsonb_to_recordset(${tx.json(rows)}::jsonb) as x(
               slide_index int, position int, region_key text, label text, description text, keywords text[],
-              box_x float8, box_y float8, box_w float8, box_h float8)`;
+              cue text, phrases text[], marks jsonb, box_x float8, box_y float8, box_w float8, box_h float8)`;
         }
       }
       return (await this.deckRecord(id, tx))!.record;
@@ -502,16 +525,17 @@ export class SupabaseStore implements Library {
         slide_index: Math.max(0, e.slide),
         region_key: e.type === "zoom" ? e.regionId : null,
         label: e.type === "zoom" ? e.label : null,
+        cue: e.type === "zoom" ? (e.cue ?? null) : null,
         command: e.type === "command" ? e.command : null,
         text: e.type === "command" || e.type === "heard" ? e.text : null,
         simulated: e.type === "heard" && !!e.simulated,
       }));
       if (events.length) {
         await tx`
-          insert into producer.run_events (run_id, seq, t_ms, type, slide_index, region_key, label, command, text, simulated)
-          select ${r.id}, x.seq, x.t_ms, x.type, x.slide_index, x.region_key, x.label, x.command, x.text, x.simulated
+          insert into producer.run_events (run_id, seq, t_ms, type, slide_index, region_key, label, cue, command, text, simulated)
+          select ${r.id}, x.seq, x.t_ms, x.type, x.slide_index, x.region_key, x.label, x.cue, x.command, x.text, x.simulated
           from jsonb_to_recordset(${tx.json(events)}::jsonb) as x(
-            seq int, t_ms int, type text, slide_index int, region_key text, label text, command text, text text,
+            seq int, t_ms int, type text, slide_index int, region_key text, label text, cue text, command text, text text,
             simulated boolean)`;
       }
       return {
@@ -523,6 +547,25 @@ export class SupabaseStore implements Library {
         stats,
       };
     });
+  }
+
+  async recordUsage(e: UsageEntry): Promise<void> {
+    await this.sql`
+      insert into producer.analysis_usage
+        (deck_id, kind, slide_index, model, effort, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms)
+      values (${e.deckId}, ${e.kind}, ${e.slideIndex}, ${e.model}, ${e.effort}, ${e.inputTokens}, ${e.outputTokens},
+              ${e.cacheReadTokens}, ${e.cacheWriteTokens}, ${e.costUsd}, ${e.durationMs})`;
+  }
+
+  async deckUsage(deckId: string): Promise<UsageSummary> {
+    const empty: UsageSummary = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+    if (!isId(deckId)) return empty;
+    const [u] = await this.sql<{ calls: number; input: number; output: number; read: number; write: number; cost: number }[]>`
+      select count(*)::int as calls, coalesce(sum(input_tokens), 0)::int as input, coalesce(sum(output_tokens), 0)::int as output,
+             coalesce(sum(cache_read_tokens), 0)::int as read, coalesce(sum(cache_write_tokens), 0)::int as write,
+             coalesce(sum(cost_usd), 0)::float8 as cost
+      from producer.analysis_usage where deck_id = ${deckId}`;
+    return { calls: u.calls, inputTokens: u.input, outputTokens: u.output, cacheReadTokens: u.read, cacheWriteTokens: u.write, costUsd: u.cost };
   }
 
   async deleteRun(id: string): Promise<boolean> {

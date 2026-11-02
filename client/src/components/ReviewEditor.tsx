@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { clampBox, normalizeRegions, type Box, type Region } from "../../../shared/schema";
-import type { Deck } from "../lib/deck";
-import { analyzeImage } from "../lib/analyzeQueue";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { clampBox, normalizeRegions, type Box, type Cue, type Region } from "../../../shared/schema";
+import { api } from "../lib/api";
+import { markRegion, type Deck } from "../lib/deck";
+import { CUES } from "../lib/cues";
+import { placePopup } from "../lib/popupPosition";
+import { highlightMarks } from "../lib/textLines";
+import { useSuggestCues } from "../lib/useSuggestCues";
 import { hue } from "../lib/useConfig";
 
 interface Props {
+  deckId: string;
   deck: Deck;
+  /** the deck already has a director's plan */
+  planned: boolean;
   initialIndex: number;
   onRegions: (index: number, regions: Region[]) => void;
-  onDownload: () => void;
-  onImport: (text: string) => void;
   onPresent: (from: number) => void;
 }
 
@@ -26,6 +31,8 @@ interface Drag {
 }
 
 const MIN = 0.02;
+/** Moving a box re-reads what's inside it, once the presenter stops adjusting. */
+const REDESCRIBE_MS = 1500;
 const pct = (n: number) => `${n * 100}%`;
 const isTyping = (e: KeyboardEvent) => {
   const t = e.target as HTMLElement | null;
@@ -49,14 +56,23 @@ function resize(kind: DragKind, o: Box, dx: number, dy: number): Box {
   return { x, y, w, h };
 }
 
-export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload, onImport, onPresent }: Props) {
+export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRegions, onPresent }: Props) {
   const [index, setIndex] = useState(Math.min(initialIndex, deck.images.length - 1));
   const [selected, setSelected] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState(false);
   const [draft, setDraft] = useState<Box | null>(null);
-  const [reanalyzing, setReanalyzing] = useState<string | null>(null);
+  const [popupAt, setPopupAt] = useState<{ x: number; y: number } | null>(null);
+  /** a box that's been drawn but not named: it only becomes a cue once it has a label */
+  const [pending, setPending] = useState<Pending | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLDivElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  const slides = useRef(deck.slides);
+  slides.current = deck.slides;
+  const redescribing = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  const { suggest, progress, message } = useSuggestCues({ deckId, deck, planned, onRegions });
 
   const image = deck.images[index];
   const regions = deck.slides[index]?.regions ?? [];
@@ -67,6 +83,59 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
   const patch = (id: string, p: Partial<Region>) => setRegions(regions.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const remove = (id: string) => {
     setRegions(regions.filter((r) => r.id !== id));
+    setSelected(null);
+  };
+
+  /** Work out how a drawn cue will be talked about. It runs after the fact, so it always reads the latest slides. */
+  const describe = async (slide: number, id: string) => {
+    const region = slides.current[slide]?.regions.find((r) => r.id === id);
+    if (!region) return;
+    try {
+      const img = deck.images[slide];
+      const [details, marks] = await Promise.all([
+        api.describeRegion(deckId, slide, region.label, region.cue ?? "outline", await markRegion(img, region.box), img.facts?.notes),
+        region.cue === "highlight" ? highlightMarks(img, region.box) : undefined,
+      ]);
+      const current = slides.current[slide]?.regions ?? [];
+      onRegions(
+        slide,
+        current.map((r) => (r.id === id ? { ...r, ...details, ...(marks ? { marks } : {}) } : r)),
+      );
+    } catch (e) {
+      // The label still works as a trigger, so a failure here doesn't lose the cue.
+      console.error("couldn't describe region", e);
+    }
+  };
+
+  /** Switching a saved cue to Highlight only needs its lines, which come from the slide with no Claude call. */
+  const refreshMarks = async (slide: number, region: Region) => {
+    const marks = await highlightMarks(deck.images[slide], region.box);
+    const current = slides.current[slide]?.regions ?? [];
+    onRegions(slide, current.map((r) => (r.id === region.id ? { ...r, marks } : r)));
+  };
+
+  const describeSoon = (slide: number, id: string) => {
+    clearTimeout(redescribing.current.get(id));
+    redescribing.current.set(id, setTimeout(() => describe(slide, id), REDESCRIBE_MS));
+  };
+
+  /** Close the popup. A drawn box with no label just disappears, so it's never saved. */
+  const closePopup = () => {
+    if (pending?.label.trim()) {
+      const fresh: Region = {
+        id: `region-${Date.now().toString(36)}`,
+        label: pending.label.trim(),
+        description: "",
+        keywords: [],
+        phrases: [],
+        cue: pending.cue,
+        box: clampBox(pending.box),
+      };
+      const next = normalizeRegions([...(slides.current[pending.slide]?.regions ?? []), fresh]);
+      onRegions(pending.slide, next);
+      describeSoon(pending.slide, next.at(-1)!.id);
+    }
+    setPending(null);
     setSelected(null);
   };
 
@@ -90,6 +159,28 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
 
   useEffect(() => setSelected(null), [index]);
 
+  // The popup follows its box, so this runs after layout, when both can be measured.
+  useLayoutEffect(() => {
+    if (!selected && !pending) return setPopupAt(null);
+    const place = () => {
+      const target = selected ? `[data-region="${CSS.escape(selected)}"]` : ".draft";
+      const box = canvas.current?.querySelector(target)?.getBoundingClientRect();
+      const host = area.current?.getBoundingClientRect();
+      const size = popup.current?.getBoundingClientRect();
+      if (!box || !host || !size) return;
+      setPopupAt(
+        placePopup(
+          { x: box.left - host.left, y: box.top - host.top, w: box.width, h: box.height },
+          { w: size.width, h: size.height },
+          { w: host.width, h: host.height },
+        ),
+      );
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [selected, sel?.box, pending?.box, index]);
+
   const point = (e: React.PointerEvent) => {
     const r = canvas.current!.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
@@ -101,7 +192,9 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
     const el = e.target as HTMLElement;
     const handle = el.dataset.handle as DragKind | undefined;
     const id = el.closest<HTMLElement>("[data-region]")?.dataset.region;
+    if (el.dataset.delete && id) return remove(id);
     canvas.current!.setPointerCapture(e.pointerId);
+    closePopup();
     if (!drawMode && id) {
       const r = regions.find((x) => x.id === id)!;
       setSelected(id);
@@ -137,25 +230,12 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
     if (d?.kind === "draw") {
       const box = d.box;
       if (d.moved && box && box.w > MIN && box.h > MIN) {
-        const fresh: Region = { id: `region-${Date.now().toString(36)}`, label: "New region", description: "", keywords: [], box: clampBox(box) };
-        const next = normalizeRegions([...regions, fresh]);
-        setRegions(next);
-        setSelected(next.at(-1)!.id);
+        setPending({ slide: index, box: clampBox(box), label: "", cue: "outline" });
         setDrawMode(false);
-      } else if (!d.moved) {
-        setSelected(null);
       }
       setDraft(null);
-    }
-  };
-
-  const reanalyze = async () => {
-    setReanalyzing("Analyzing…");
-    try {
-      setRegions(await analyzeImage(image.url));
-      setReanalyzing(null);
-    } catch (e) {
-      setReanalyzing(e instanceof Error ? e.message : String(e));
+    } else if (d?.moved && d.id) {
+      describeSoon(index, d.id);
     }
   };
 
@@ -174,35 +254,23 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
 
       <section className="center">
         <div className="toolbar">
-          <button className={`btn small ${drawMode ? "on" : ""}`} onClick={() => setDrawMode((d) => !d)} title="N">
-            {drawMode ? "Drawing… drag on the slide" : "+ Draw region"}
+          <button className="btn small" onClick={suggest} disabled={!!progress}>
+            Suggest cues
           </button>
-          <button className="btn small" onClick={reanalyze} disabled={reanalyzing === "Analyzing…"}>
-            Re-analyze slide
-          </button>
-          {reanalyzing && <span className="hint">{reanalyzing}</span>}
+          <span className="hint">
+            {progress ?? message ?? (regions.length ? "Drag on the slide to add a cue" : "Drag on the slide to add a cue, or have Claude suggest them")}
+          </span>
           <div className="spacer" />
-          <label className="btn small ghost">
-            Load regions…
-            <input
-              type="file"
-              accept=".json,application/json"
-              hidden
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                if (f) onImport(await f.text());
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button className="btn small" onClick={onDownload}>
-            Download regions
-          </button>
           <button className="btn small accent" onClick={() => onPresent(index)}>
             Present ▶
           </button>
         </div>
-        <div className="canvas-wrap" style={{ containerType: "size" }}>
+        <div
+          ref={area}
+          className="canvas-wrap"
+          style={{ containerType: "size" }}
+          onPointerDown={(e) => e.target === e.currentTarget && closePopup()}
+        >
           <div
             ref={canvas}
             className={`canvas ${drawMode ? "drawing" : ""}`}
@@ -211,6 +279,8 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            // Pressing the slide closes the popup itself, so focus staying put keeps that from happening twice.
+            onMouseDown={(e) => e.preventDefault()}
           >
             <img src={image.url} alt={`Slide ${index + 1}`} draggable={false} />
             {regions.map((r, i) => (
@@ -228,106 +298,118 @@ export default function ReviewEditor({ deck, initialIndex, onRegions, onDownload
                 }}
               >
                 <span className="tag">{r.label}</span>
-                {r.id === selected &&
-                  (["nw", "ne", "sw", "se"] as const).map((h) => <span key={h} className={`h ${h}`} data-handle={h} />)}
+                {r.id === selected && (
+                  <>
+                    {(["nw", "ne", "sw", "se"] as const).map((h) => (
+                      <span key={h} className={`h ${h}`} data-handle={h} />
+                    ))}
+                    <span className="x" data-delete="1" title="Delete">
+                      ×
+                    </span>
+                  </>
+                )}
               </div>
             ))}
-            {draft && <div className="draft" style={{ left: pct(draft.x), top: pct(draft.y), width: pct(draft.w), height: pct(draft.h) }} />}
+            {(draft ?? (pending?.slide === index ? pending.box : null)) && (
+              <DraftBox box={(draft ?? pending?.box)!} />
+            )}
           </div>
+          {(pending || sel) && (
+            <CuePopup
+              key={pending ? "new" : sel!.id}
+              ref={popup}
+              label={pending ? pending.label : sel!.label}
+              cue={pending ? pending.cue : (sel!.cue ?? "zoom")}
+              at={popupAt}
+              onLabel={(label) => (pending ? setPending({ ...pending, label }) : patch(sel!.id, { label }))}
+              onCue={(cue) => {
+                if (pending) return setPending({ ...pending, cue });
+                patch(sel!.id, { cue });
+                if (cue === "highlight") refreshMarks(index, sel!);
+              }}
+              onClose={closePopup}
+              onCancel={() => {
+                setPending(null);
+                setSelected(null);
+              }}
+            />
+          )}
         </div>
       </section>
-
-      <aside className="side">
-        {sel ? (
-          <RegionForm key={sel.id} region={sel} onChange={(p) => patch(sel.id, p)} onDelete={() => remove(sel.id)} onClose={() => setSelected(null)} />
-        ) : (
-          <>
-            <div>
-              <div className="micro">Slide {index + 1}</div>
-              <h3>{regions.length} regions</h3>
-            </div>
-            <div className="hint">
-              Click a box to edit it. Drag to move, pull the corners to resize. Drag on an empty area (or press{" "}
-              <span className="kbd">N</span>) to draw a new region. <span className="kbd">Del</span> removes the selected
-              one. <span className="kbd">←</span> <span className="kbd">→</span> change slides.
-            </div>
-            <div className="rlist">
-              {regions.map((r, i) => (
-                <button key={r.id} onClick={() => setSelected(r.id)} style={{ ["--hue" as string]: hue(i) }}>
-                  <span className="swatch" />
-                  <span style={{ flex: 1 }}>{r.label}</span>
-                  <span className="hint">{r.keywords.length} kw</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </aside>
     </div>
   );
 }
 
-function RegionForm({
-  region,
-  onChange,
-  onDelete,
-  onClose,
-}: {
-  region: Region;
-  onChange: (p: Partial<Region>) => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  const [kw, setKw] = useState(region.keywords.join(", "));
-  const commitKeywords = (text: string) =>
-    onChange({ keywords: [...new Set(text.split(/[,\n]/).map((k) => k.trim()).filter(Boolean))] });
+interface Pending {
+  slide: number;
+  box: Box;
+  label: string;
+  cue: Cue;
+}
 
+function DraftBox({ box }: { box: Box }) {
+  return <div className="draft" style={{ left: pct(box.x), top: pct(box.y), width: pct(box.w), height: pct(box.h) }} />;
+}
+
+function CuePopup({
+  ref,
+  label,
+  cue,
+  at,
+  onLabel,
+  onCue,
+  onClose,
+  onCancel,
+}: {
+  ref: React.Ref<HTMLDivElement>;
+  label: string;
+  cue: Cue;
+  at: { x: number; y: number } | null;
+  onLabel: (label: string) => void;
+  onCue: (cue: Cue) => void;
+  /** finished with it: keeps the cue if it has a label */
+  onClose: () => void;
+  onCancel: () => void;
+}) {
+  // A saved cue can't lose its name, so clearing the box leaves the last label in place.
+  const [text, setText] = useState(label);
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div className="micro">Region · {region.id}</div>
-        <button className="btn small ghost" onClick={onClose}>
-          Done
-        </button>
-      </div>
+    <div
+      ref={ref}
+      className="cue-popup"
+      style={at ? { left: at.x, top: at.y } : { left: 0, top: 0, opacity: 0 }}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget)) onClose();
+      }}
+    >
       <label>
         <span className="micro">Label</span>
-        <input className="field" value={region.label} autoFocus={region.label === "New region"} onChange={(e) => onChange({ label: e.target.value })} />
-      </label>
-      <label>
-        <span className="micro">Description</span>
-        <textarea className="field" value={region.description} onChange={(e) => onChange({ description: e.target.value })} />
-      </label>
-      <label>
-        <span className="micro">Keywords, comma separated</span>
-        <textarea
+        <input
           className="field"
-          style={{ minHeight: 96 }}
-          value={kw}
+          value={text}
+          placeholder="Name this cue"
+          autoFocus
           onChange={(e) => {
-            setKw(e.target.value);
-            commitKeywords(e.target.value);
+            setText(e.target.value);
+            if (e.target.value.trim()) onLabel(e.target.value);
           }}
-          placeholder="gross margin, profitability, 61 percent"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onClose();
+            if (e.key === "Escape") onCancel();
+          }}
         />
       </label>
-      <div className="chips">
-        {region.keywords.map((k) => (
-          <span key={k} className="chip">
-            {k}
-          </span>
-        ))}
+      <div>
+        <span className="micro">Cue</span>
+        <div className="seg">
+          {CUES.map(([value, name]) => (
+            // Choosing a cue shouldn't take focus from the label, or that would count as leaving the popup.
+            <button key={value} className={cue === value ? "on" : ""} onMouseDown={(e) => e.preventDefault()} onClick={() => onCue(value)}>
+              {name}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="hint">
-        Say these words while presenting to zoom here. Include how you'd say numbers out loud ("38 percent"). Words
-        that other regions on this slide share count for less.
-      </div>
-      <div className="hint">
-        Box: x {region.box.x.toFixed(3)}, y {region.box.y.toFixed(3)}, w {region.box.w.toFixed(3)}, h {region.box.h.toFixed(3)}
-      </div>
-      <button className="btn small" style={{ alignSelf: "flex-start", color: "var(--err)" }} onClick={onDelete}>
-        Delete region
-      </button>
-    </>
+    </div>
   );
 }

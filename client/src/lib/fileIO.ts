@@ -1,18 +1,4 @@
-import { deckTitle } from "./format";
-import { PRODUCER_FILE_VERSION, ProducerFileSchema, normalizeRegions, type ProducerFile, type Slide } from "../../../shared/schema";
-
-export function buildFile(pdfName: string, pdfHash: string, slides: Slide[]): ProducerFile {
-  return { version: PRODUCER_FILE_VERSION, pdfName, pdfHash, slides };
-}
-
-export function downloadFile(file: ProducerFile): void {
-  const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = deckTitle(file.pdfName) + ".regions.json";
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
+import { ProducerFileSchema, normalizeRegions, type ProducerFile, type Slide } from "../../../shared/schema";
 
 export interface LoadedRegions {
   file: ProducerFile;
@@ -29,7 +15,7 @@ export function parseRegionsFile(text: string, pdfHash: string, slideCount: numb
     throw new Error("That file isn't valid JSON.");
   }
   const parsed = ProducerFileSchema.safeParse(json);
-  if (!parsed.success) throw new Error(`Not a Producer regions file: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  if (!parsed.success) throw new Error(`Not a Stage regions file: ${parsed.error.issues[0]?.message ?? "invalid"}`);
   const file = parsed.data;
   const warnings: string[] = [];
   if (file.pdfHash !== pdfHash) warnings.push(`This regions file was made for a different presentation ("${file.pdfName}"). Boxes may not line up.`);

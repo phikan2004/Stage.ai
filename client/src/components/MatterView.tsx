@@ -76,7 +76,7 @@ export default function MatterView({ id }: { id: string }) {
                 <span className="hint">{plural(data.decks.length, "deck")}</span>
               </div>
               <div className="cards">
-                <AddDeckCard matterId={id} />
+                {(data.matter.deckMode !== "single" || data.decks.length === 0) && <AddDeckCard matterId={id} />}
                 {data.decks.map((d) => (
                   <DeckCard key={d.id} deck={d} onDelete={() => deleteDeck(d)} />
                 ))}
@@ -221,14 +221,14 @@ function AddDeckCard({ matterId }: { matterId: string }) {
         <>
           <span className="plus">+</span>
           <span>Add a presentation</span>
-          <span className="hint">Drop a PowerPoint or PDF here, or click to choose. Add its .regions.json too to skip analysis.</span>
+          <span className="hint">Drop a PowerPoint or PDF here, or click to choose.</span>
         </>
       )}
       {error && <span className="hint" style={{ color: "var(--err)" }}>{error}</span>}
       <input
         ref={input}
         type="file"
-        accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/pdf,.pdf,.json"
+        accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/pdf,.pdf"
         multiple
         hidden
         onClick={(e) => e.stopPropagation()}

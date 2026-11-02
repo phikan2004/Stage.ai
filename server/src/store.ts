@@ -6,6 +6,7 @@ import {
   type DeckCreate,
   type DeckDetail,
   type DeckFormat,
+  type DeckMode,
   type DeckPatch,
   type DeckRecord,
   type DeckSummary,
@@ -20,12 +21,21 @@ import {
   type RunSummary,
   type Show,
   type ShowPatch,
+  type UsageEntry,
+  type UsageSummary,
 } from "../../shared/schema.ts";
 
 /** createDeck was called before the file reached the upload url. */
 export class UploadMissingError extends Error {
   constructor() {
     super("The upload didn't arrive. Try adding the presentation again.");
+  }
+}
+
+/** prepareUpload was called for a one-presentation matter that already has its presentation. */
+export class MatterFullError extends Error {
+  constructor() {
+    super("This matter holds one presentation. Delete it to add a different one.");
   }
 }
 
@@ -45,7 +55,7 @@ export interface Library {
   run(id: string): Promise<RunDetail | null>;
   deckFile(deckId: string): Promise<DeckFileSource | null>;
   thumb(deckId: string): Promise<Buffer | null>;
-  createMatter(name: string): Promise<Matter>;
+  createMatter(name: string, deckMode: DeckMode): Promise<Matter>;
   renameMatter(id: string, name: string): Promise<Matter | null>;
   deleteMatter(id: string): Promise<boolean>;
   /** Reserves a deck id and says where to send its file; null if the matter doesn't exist. */
@@ -63,6 +73,8 @@ export interface Library {
   createShow(matterId: string, name: string): Promise<Show | null>;
   patchShow(id: string, patch: ShowPatch): Promise<Show | null>;
   deleteShow(id: string): Promise<boolean>;
+  recordUsage(entry: UsageEntry): Promise<void>;
+  deckUsage(deckId: string): Promise<UsageSummary>;
 }
 
 interface Db {
@@ -71,6 +83,7 @@ interface Db {
   decks: DeckRecord[];
   runs: Run[];
   shows: Show[];
+  usage: UsageEntry[];
 }
 
 const newId = () => randomBytes(6).toString("base64url");
@@ -82,7 +95,7 @@ const RECENT_RUNS = 25;
  * configured; writes are serialized and atomic (temp file + rename).
  */
 export class FileStore implements Library {
-  private db: Db = { version: 1, matters: [], decks: [], runs: [], shows: [] };
+  private db: Db = { version: 1, matters: [], decks: [], runs: [], shows: [], usage: [] };
   private writing: Promise<void> = Promise.resolve();
   /** ids handed out by prepareUpload; the only ids /api/uploads may write to */
   private pending = new Map<string, DeckFormat>();
@@ -110,6 +123,7 @@ export class FileStore implements Library {
     await mkdir(join(this.dir, "decks"), { recursive: true });
     try {
       this.db = { ...this.db, ...JSON.parse(await readFile(this.dbPath, "utf8")) };
+      for (const m of this.db.matters) m.deckMode ??= "multiple";
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
@@ -211,9 +225,9 @@ export class FileStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string): Promise<Matter> {
+  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
     const now = Date.now();
-    const m: Matter = { id: newId(), name, createdAt: now, updatedAt: now };
+    const m: Matter = { id: newId(), name, deckMode, createdAt: now, updatedAt: now };
     this.db.matters.push(m);
     await this.save();
     return m;
@@ -241,7 +255,9 @@ export class FileStore implements Library {
   }
 
   async prepareUpload(matterId: string, format: DeckFormat): Promise<DeckUpload | null> {
-    if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    const matter = this.db.matters.find((m) => m.id === matterId);
+    if (!matter) return null;
+    if (matter.deckMode === "single" && this.db.decks.some((d) => d.matterId === matterId)) throw new MatterFullError();
     const deckId = newId();
     this.pending.set(deckId, format);
     return { deckId, url: `/api/uploads/${deckId}` };
@@ -284,6 +300,7 @@ export class FileStore implements Library {
     if (patch.name !== undefined) d.name = patch.name;
     if (patch.slides !== undefined) d.slides = patch.slides;
     if (patch.analyzed !== undefined) d.analyzed = patch.analyzed;
+    if (patch.plan !== undefined) d.plan = patch.plan;
     d.updatedAt = Date.now();
     this.touchMatter(d.matterId, d.updatedAt);
     await this.save();
@@ -326,6 +343,25 @@ export class FileStore implements Library {
     this.touchMatter(d.matterId, input.endedAt);
     await this.save();
     return run;
+  }
+
+  async recordUsage(entry: UsageEntry): Promise<void> {
+    this.db.usage.push(entry);
+    await this.save();
+  }
+
+  async deckUsage(deckId: string): Promise<UsageSummary> {
+    const sum: UsageSummary = { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
+    for (const u of this.db.usage) {
+      if (u.deckId !== deckId) continue;
+      sum.calls++;
+      sum.inputTokens += u.inputTokens;
+      sum.outputTokens += u.outputTokens;
+      sum.cacheReadTokens += u.cacheReadTokens;
+      sum.cacheWriteTokens += u.cacheWriteTokens;
+      sum.costUsd += u.costUsd ?? 0;
+    }
+    return sum;
   }
 
   async deleteRun(id: string): Promise<boolean> {
