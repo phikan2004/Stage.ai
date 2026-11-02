@@ -194,6 +194,75 @@ export function summarizeRun(r: Pick<RunInput, "events" | "startedAt" | "endedAt
   return { durationMs: Math.max(0, r.endedAt - r.startedAt), slidesVisited: slides.size, zooms, commands, words };
 }
 
+/* ---------- stage: shows ---------- */
+
+/** One thing the presenter says and one thing that happens on screen. An understanding, not a list of clicks. */
+export const BeatSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().trim().min(1).max(200),
+  /** what the operator is trying to achieve */
+  goal: z.string().trim().min(1),
+  /** what the screen looks like when it's done */
+  success: z.string(),
+  /** the presenter's own words for this moment */
+  cues: z.array(z.string().min(1)),
+  /** reference screenshots, by file name in the recording. They stay on the presenter's Mac. */
+  landmarks: z.array(z.string()),
+  /** corrections from dry runs */
+  notes: z.string(),
+});
+export type Beat = z.infer<typeof BeatSchema>;
+
+/** What the operator may touch in this show. */
+export const ShowLimitsSchema = z.object({
+  apps: z.array(z.string().min(1)),
+  origins: z.array(z.string().min(1)),
+  /** terminal commands seen in the recording; anything else needs approval */
+  commands: z.array(z.string().min(1)),
+});
+export type ShowLimits = z.infer<typeof ShowLimitsSchema>;
+
+export const BEAT_OUTCOMES = ["done", "stuck", "stopped", "failed"] as const;
+
+export const BeatResultSchema = z.object({
+  beatId: z.string(),
+  outcome: z.enum(BEAT_OUTCOMES),
+  summary: z.string(),
+  ms: z.number(),
+  cueToActionMs: z.number().nullable(),
+});
+export type BeatResult = z.infer<typeof BeatResultSchema>;
+
+export const DryRunSchema = z.object({ at: z.number(), results: z.array(BeatResultSchema) });
+export type DryRun = z.infer<typeof DryRunSchema>;
+
+/** Dry runs kept per show, newest last. Enough to score each beat. */
+export const MAX_DRY_RUNS = 20;
+
+/** A demo the operator has been taught. */
+export const ShowSchema = z.object({
+  id: Id,
+  matterId: Id,
+  name: z.string().trim().min(1).max(200),
+  beats: z.array(BeatSchema),
+  limits: ShowLimitsSchema,
+  /** the local recording the beats were learned from */
+  recordingId: z.string().nullable(),
+  dryRuns: z.array(DryRunSchema).max(MAX_DRY_RUNS),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type Show = z.infer<typeof ShowSchema>;
+
+export const ShowPatchSchema = ShowSchema.pick({ name: true, beats: true, limits: true, recordingId: true, dryRuns: true }).partial();
+export type ShowPatch = z.infer<typeof ShowPatchSchema>;
+
+/** Passed dry runs out of all that reached this beat. */
+export function beatScore(dryRuns: DryRun[], beatId: string): { passed: number; total: number } {
+  const results = dryRuns.flatMap((r) => r.results.filter((b) => b.beatId === beatId && b.outcome !== "stopped"));
+  return { passed: results.filter((b) => b.outcome === "done").length, total: results.length };
+}
+
 /* API response shapes */
 export type RunSummary = Omit<Run, "events"> & { matterName: string };
 export type DeckSummary = Omit<DeckRecord, "slides"> & { regionCount: number; runCount: number; lastRunAt: number | null };

@@ -2,6 +2,7 @@
 // Speaks JSON lines: {"id":1,"cmd":"click",...} on stdin, {"id":1,"ok":true,...} or {"event":"hotkey",...} on stdout.
 import AppKit
 import ApplicationServices
+import Carbon
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -364,6 +365,93 @@ func startHotkeys() throws {
   }
 }
 
+/* ---------- recording ---------- */
+
+// Only runs during Teach. Listens without changing anything, ignores the agent's own events, and reports what the
+// presenter does. Nothing typed into a password field gets past focusIsSecure.
+var recordTap: CFMachPort?
+var recordSource: CFRunLoopSource?
+let recordQueue = DispatchQueue(label: "stage.record")
+let KEY_NAMES = Dictionary(KEYS.map { ($0.value, $0.key) }, uniquingKeysWith: { a, b in min(a, b) })
+let NAMED_ONLY: Set<CGKeyCode> = [36, 48, 51, 53, 115, 116, 117, 119, 121, 123, 124, 125, 126]
+
+func focusIsSecure() -> Bool {
+  if IsSecureEventInputEnabled() { return true }
+  guard let f = attr(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute), CFGetTypeID(f) == AXUIElementGetTypeID() else { return false }
+  return text(f as! AXUIElement, kAXSubroleAttribute) == "AXSecureTextField"
+}
+
+func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
+
+func emitClick(_ p: CGPoint, button: String, t: Double) {
+  var out: Json = ["event": "input", "kind": "click", "x": p.x, "y": p.y, "button": button, "t": t, "app": frontApp()?.localizedName ?? ""]
+  var hit: AXUIElement?
+  if AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &hit) == .success, let hit {
+    out["role"] = (text(hit, kAXRoleAttribute) ?? "").replacingOccurrences(of: "AX", with: "")
+    out["name"] = text(hit, kAXTitleAttribute) ?? text(hit, kAXDescriptionAttribute) ?? ""
+  }
+  emit(out)
+}
+
+func emitKey(code: CGKeyCode, flags: CGEventFlags, chars: String, t: Double) {
+  if focusIsSecure() { return emit(["event": "input", "kind": "secure", "t": t]) }
+  var out: Json = ["event": "input", "kind": "key", "t": t, "app": frontApp()?.localizedName ?? ""]
+  let mods = [(CGEventFlags.maskCommand, "cmd"), (.maskControl, "ctrl"), (.maskAlternate, "alt")].filter { flags.contains($0.0) }.map { $0.1 }
+  if !mods.isEmpty || NAMED_ONLY.contains(code) {
+    out["combo"] = (mods + [KEY_NAMES[code] ?? "key\(code)"]).joined(separator: "+")
+  } else {
+    out["text"] = chars
+  }
+  emit(out)
+}
+
+let onInput: CGEventTapCallBack = { _, type, event, _ in
+  if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+    if let recordTap { CGEvent.tapEnable(tap: recordTap, enable: true) }
+    return Unmanaged.passUnretained(event)
+  }
+  if event.getIntegerValueField(.eventSourceUserData) == OWN_EVENT { return Unmanaged.passUnretained(event) }
+  let t = nowMs()
+  if type == .keyDown {
+    let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+    let flags = event.flags
+    var length = 0
+    var units = [UniChar](repeating: 0, count: 8)
+    event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &length, unicodeString: &units)
+    let chars = String(utf16CodeUnits: units, count: length)
+    recordQueue.async { emitKey(code: code, flags: flags, chars: chars, t: t) }
+  } else {
+    let p = event.location
+    let button = type == .rightMouseDown ? "right" : "left"
+    recordQueue.async { emitClick(p, button: button, t: t) }
+  }
+  return Unmanaged.passUnretained(event)
+}
+
+func setRecording(_ on: Bool) throws {
+  if !on {
+    DispatchQueue.main.async {
+      if let recordTap { CGEvent.tapEnable(tap: recordTap, enable: false) }
+      if let recordSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), recordSource, .commonModes) }
+      recordTap = nil
+      recordSource = nil
+    }
+    return
+  }
+  if recordTap != nil { return }
+  let mask = CGEventMask(1 << CGEventType.keyDown.rawValue | 1 << CGEventType.leftMouseDown.rawValue | 1 << CGEventType.rightMouseDown.rawValue)
+  guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly, eventsOfInterest: mask, callback: onInput, userInfo: nil) else {
+    throw HelperError(message: "Couldn't record input. Grant Accessibility permission.")
+  }
+  recordTap = t
+  let source = CFMachPortCreateRunLoopSource(nil, t, 0)
+  recordSource = source
+  DispatchQueue.main.async {
+    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+    CGEvent.tapEnable(tap: t, enable: true)
+  }
+}
+
 /* ---------- dispatch ---------- */
 
 func handle(_ req: Json) throws -> Json {
@@ -384,6 +472,7 @@ func handle(_ req: Json) throws -> Json {
   case "scroll": try scroll(req)
   case "place": try place(req)
   case "hotkeys": try startHotkeys()
+  case "record": try setRecording(req["on"] as? Bool ?? false)
   default: throw HelperError(message: "Unknown command: \(req["cmd"] ?? "none")")
   }
   return [:]

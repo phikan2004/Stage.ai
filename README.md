@@ -43,15 +43,37 @@ Stage is an AI operator for live software demos: you talk, and it performs the d
 from the real screen, and nothing is replayed. While you're still talking, it decides its next actions and holds them
 until you reach that moment, then checks the screen hasn't changed and runs them. If it has changed, it decides again.
 
-So far this is the runner, a local process in `runner/` with a Swift helper for screen and input. The console and
-teaching flows aren't built yet. It runs on your Mac because a web page can't control other apps and Vercel can't reach
-your computer.
+It has two parts: the runner in `runner/`, a local process with a Swift helper for screen and input, and a Shows section
+in each matter. It runs on your Mac because a web page can't control other apps and Vercel can't reach your computer.
+
+To teach a show, start both of these in Terminal, then open a matter at <http://localhost:5180> and add a show. The first
+time, open the pairing link the runner prints.
+
+```bash
+npm run stage:dev
+```
+
+```bash
+npm run stage
+```
+
+1. **Teach:** press Start recording, do the demo on the audience display while talking through it, then press Stop and
+   learn. Only that display, what you do on it, and your voice are recorded. Password fields aren't. Recordings stay in
+   `data/recordings/`.
+2. **Review:** check the beats and the limits. Add corrections in each beat's notes.
+3. **Dry run:** the AI performs the show live. Each beat is scored. Dry runs don't reset your demo yet, so put it back
+   to its starting state yourself between runs.
+
+`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using Shows
+with Supabase needs the `producer.shows` migration, which applies when it reaches production.
 
 | Command | What it does |
 |---|---|
+| `npm run stage` | Starts the runner for the Shows page |
 | `npm run stage -- --setup` | Asks macOS for Accessibility and Screen Recording, and lists your displays |
 | `npm run stage -- --look` | Prints what it sees on the stage display |
 | `npm run stage -- --try textedit` | Performs one action with no AI (`browser`, `terminal` or `textedit`) |
+| `npm run stage -- --try safety` | Tests the stop key, the clicker and the display limit on your Mac |
 | `npm run stage -- --goal "…" --allow TextEdit` | Runs the live agent on one goal |
 | `npm run stage -- --goal "…" --target browser --url http://localhost:5173` | The same, in Chrome |
 

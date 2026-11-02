@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Hash routes: "#/", "#/m/<matter>", "#/d/<deck>", "#/r/<run>". */
+/** Hash routes: "#/", "#/m/<matter>", "#/d/<deck>", "#/r/<run>", "#/s/<show>", "#/pair/<token>". */
 export function useRoute(): string[] {
   const [hash, setHash] = useState(() => location.hash);
   useEffect(() => {
@@ -9,6 +9,8 @@ export function useRoute(): string[] {
       window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", on);
+    // The hash can change before this effect runs, and that event is gone by now.
+    setHash(location.hash);
     return () => window.removeEventListener("hashchange", on);
   }, []);
   return hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);

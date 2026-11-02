@@ -11,6 +11,8 @@ export interface Model {
   turn(messages: MessageParam[], signal: AbortSignal): Promise<Message>;
 }
 
+export type { ContentParam };
+
 export type BeatEvent =
   | { type: "looking" }
   | { type: "armed"; actions: string[] }
@@ -21,6 +23,8 @@ export type BeatEvent =
 
 export interface BeatOptions {
   goal: string;
+  /** What the operator already knows about this beat, ahead of the live screen. */
+  context?: ContentParam[];
   driver: Driver;
   model: Model;
   limits: Limits;
@@ -263,7 +267,7 @@ export async function runBeat(o: BeatOptions): Promise<BeatReport> {
     }
     o.onEvent?.({ type: "looking" });
     let view = await driver.look();
-    const messages: MessageParam[] = [{ role: "user", content: [{ type: "text", text: `Goal for this beat: ${o.goal}` }, ...viewBlocks(view)] }];
+    const messages: MessageParam[] = [{ role: "user", content: [{ type: "text", text: `Goal for this beat: ${o.goal}` }, ...(o.context ?? []), ...viewBlocks(view)] }];
 
     while (true) {
       const res = await Promise.race([model.turn(messages, ctl.signal), stopped]);

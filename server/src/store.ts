@@ -18,6 +18,8 @@ import {
   type RunDetail,
   type RunInput,
   type RunSummary,
+  type Show,
+  type ShowPatch,
 } from "../../shared/schema.ts";
 
 /** createDeck was called before the file reached the upload url. */
@@ -56,6 +58,11 @@ export interface Library {
   deleteDeck(id: string): Promise<boolean>;
   addRun(input: RunInput): Promise<Run | null>;
   deleteRun(id: string): Promise<boolean>;
+  shows(matterId: string): Promise<Show[] | null>;
+  show(id: string): Promise<Show | null>;
+  createShow(matterId: string, name: string): Promise<Show | null>;
+  patchShow(id: string, patch: ShowPatch): Promise<Show | null>;
+  deleteShow(id: string): Promise<boolean>;
 }
 
 interface Db {
@@ -63,6 +70,7 @@ interface Db {
   matters: Matter[];
   decks: DeckRecord[];
   runs: Run[];
+  shows: Show[];
 }
 
 const newId = () => randomBytes(6).toString("base64url");
@@ -74,7 +82,7 @@ const RECENT_RUNS = 25;
  * configured; writes are serialized and atomic (temp file + rename).
  */
 export class FileStore implements Library {
-  private db: Db = { version: 1, matters: [], decks: [], runs: [] };
+  private db: Db = { version: 1, matters: [], decks: [], runs: [], shows: [] };
   private writing: Promise<void> = Promise.resolve();
   /** ids handed out by prepareUpload; the only ids /api/uploads may write to */
   private pending = new Map<string, DeckFormat>();
@@ -226,6 +234,7 @@ export class FileStore implements Library {
     this.db.matters = this.db.matters.filter((m) => m.id !== id);
     this.db.decks = this.db.decks.filter((d) => d.matterId !== id);
     this.db.runs = this.db.runs.filter((r) => r.matterId !== id);
+    this.db.shows = this.db.shows.filter((x) => x.matterId !== id);
     await this.save();
     await Promise.all(deckIds.map((d) => rm(this.deckDir(d), { recursive: true, force: true })));
     return true;
@@ -323,6 +332,43 @@ export class FileStore implements Library {
     const before = this.db.runs.length;
     this.db.runs = this.db.runs.filter((r) => r.id !== id);
     if (this.db.runs.length === before) return false;
+    await this.save();
+    return true;
+  }
+
+  /* ---------- shows ---------- */
+
+  async shows(matterId: string): Promise<Show[] | null> {
+    if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    return this.db.shows.filter((x) => x.matterId === matterId).sort(byRecent);
+  }
+
+  async show(id: string): Promise<Show | null> {
+    return this.db.shows.find((x) => x.id === id) ?? null;
+  }
+
+  async createShow(matterId: string, name: string): Promise<Show | null> {
+    if (!this.db.matters.some((m) => m.id === matterId)) return null;
+    const now = Date.now();
+    const show: Show = { id: newId(), matterId, name, beats: [], limits: { apps: [], origins: [], commands: [] }, recordingId: null, dryRuns: [], createdAt: now, updatedAt: now };
+    this.db.shows.push(show);
+    this.touchMatter(matterId, now);
+    await this.save();
+    return show;
+  }
+
+  async patchShow(id: string, patch: ShowPatch): Promise<Show | null> {
+    const show = this.db.shows.find((x) => x.id === id);
+    if (!show) return null;
+    Object.assign(show, patch, { updatedAt: Date.now() });
+    this.touchMatter(show.matterId, show.updatedAt);
+    await this.save();
+    return show;
+  }
+
+  async deleteShow(id: string): Promise<boolean> {
+    if (!this.db.shows.some((x) => x.id === id)) return false;
+    this.db.shows = this.db.shows.filter((x) => x.id !== id);
     await this.save();
     return true;
   }

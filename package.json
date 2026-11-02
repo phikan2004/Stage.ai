@@ -13,7 +13,8 @@
     "test": "npm -w client run test && npm -w runner run test",
     "build": "npm -w client run build && npm -w server run typecheck && npm -w runner run typecheck",
     "make-sample": "tsx scripts/make-sample.ts",
-    "stage": "npm -w runner run stage --"
+    "stage": "npm -w runner run stage --",
+    "stage:dev": "PORT=8790 PRODUCER_STORE=file concurrently -k -n server,client -c auto \"npm -w server run dev\" \"npm -w client run dev -- --port 5180 --strictPort\""
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
