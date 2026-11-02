@@ -1,7 +1,7 @@
 -- A matter holds either one presentation or several. Existing matters keep working as several.
 
 alter table producer.matters
-  add column deck_mode text not null default 'multiple' check (deck_mode in ('single', 'multiple'));
+  add column if not exists deck_mode text not null default 'multiple' check (deck_mode in ('single', 'multiple'));
 
 comment on column producer.matters.deck_mode is 'single: one presentation; multiple: any number.';
 
