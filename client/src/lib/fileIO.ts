@@ -15,7 +15,7 @@ export function parseRegionsFile(text: string, pdfHash: string, slideCount: numb
     throw new Error("That file isn't valid JSON.");
   }
   const parsed = ProducerFileSchema.safeParse(json);
-  if (!parsed.success) throw new Error(`Not a Producer regions file: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  if (!parsed.success) throw new Error(`Not a Stage regions file: ${parsed.error.issues[0]?.message ?? "invalid"}`);
   const file = parsed.data;
   const warnings: string[] = [];
   if (file.pdfHash !== pdfHash) warnings.push(`This regions file was made for a different presentation ("${file.pdfName}"). Boxes may not line up.`);

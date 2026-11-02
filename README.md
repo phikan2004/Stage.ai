@@ -1,4 +1,4 @@
-# Producer
+# Stage
 
 A prototype presentation surface that listens while you present and automatically zooms into the part of the slide
 you're talking about. It exists to answer one question: **does the effect feel good?**
@@ -103,7 +103,7 @@ leaves an unused file in the bucket.
 1. Import the repo with the **Services** framework preset and Root Directory `./`. Don't use "Import single project".
 2. Add the variables from `.env`. `DATABASE_URL` must be the **Transaction pooler** string (port 6543), and the
    Deepgram key needs the **Member** role. The server won't start on Vercel without the Supabase variables.
-3. Under **Settings → Deployment Protection**, choose **All Deployments** with **Vercel Authentication**. Producer has
+3. Under **Settings → Deployment Protection**, choose **All Deployments** with **Vercel Authentication**. Stage has
    no login of its own, so without this anyone with the URL can read and delete your matters and use your API keys.
 
 The server's build command is `npm run typecheck` on purpose: an explicit build command makes Vercel skip its own type
@@ -250,7 +250,7 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
 - **Chrome only for the built-in engine.** (Deepgram works in any modern browser.) The Web Speech API isn't available in Firefox, and Safari's version is unreliable.
   Elsewhere the HUD shows "No mic" and the simulate box still works.
 - **Web Speech is cloud-based.** Chrome sends audio to Google. It needs a network connection, adds roughly 300–1000 ms of
-  latency, and ends sessions on its own. Producer restarts it automatically, with backoff after errors. A dedicated
+  latency, and ends sessions on its own. Stage restarts it automatically, with backoff after errors. A dedicated
   streaming STT would be faster and more private.
 - **Vision bounding boxes are approximate.** Models are good at what a region is and what words describe it, but boxes
   are often off by 5–20%. Expect to fix boxes in Review. The sample deck's regions are exact on purpose, so you can judge
@@ -258,7 +258,7 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
 - **Keyword matching, not meaning.** Paraphrases that share no words with a region's keywords won't trigger it. Adding
   the phrases you actually say is the fix for now.
 - Esc as "zoom out" while full-screen relies on Chrome's Keyboard Lock API. Without it, the browser takes the first Esc
-  to exit full-screen (Producer also zooms out when that happens).
+  to exit full-screen (Stage also zooms out when that happens).
 - Single-user storage: one JSON file on the server, no accounts. Opening a deck re-renders its file in the browser
   (the last 3 decks stay cached for the tab).
 - A run is saved when the presenter closes. If the tab is closed mid-presentation it's sent with `sendBeacon`, which

@@ -136,6 +136,6 @@ const port = Number(process.env.PORT) || 8787;
 app.listen(port, () => {
   const k = (v?: string) => (v ? "set" : "MISSING");
   console.log(
-    `Producer API on http://localhost:${port} (Claude key ${k(process.env.ANTHROPIC_API_KEY)}, Deepgram key ${k(process.env.DEEPGRAM_API_KEY)}, data in ${store.where})`,
+    `Stage API on http://localhost:${port} (Claude key ${k(process.env.ANTHROPIC_API_KEY)}, Deepgram key ${k(process.env.DEEPGRAM_API_KEY)}, data in ${store.where})`,
   );
 });

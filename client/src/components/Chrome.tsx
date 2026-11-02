@@ -11,7 +11,7 @@ export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?:
   return (
     <header className="topbar">
       <a className="brand" href="#/">
-        Producer<span className="brand-dot">.</span>
+        Stage<span className="brand-dot">.</span>
       </a>
       {crumbs.length > 0 && (
         <nav className="crumbs">

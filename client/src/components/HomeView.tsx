@@ -15,7 +15,7 @@ export default function HomeView() {
     api
       .home()
       .then(setData)
-      .catch((e) => setError(`The Producer server isn't reachable (${e instanceof Error ? e.message : e}). Start it with npm run dev.`));
+      .catch((e) => setError(`The Stage server isn't reachable (${e instanceof Error ? e.message : e}). Start it with npm run dev.`));
   }, []);
 
   const trySample = async () => {
