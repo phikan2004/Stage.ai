@@ -20,7 +20,11 @@ export const TERMINALS = new Set([
   "com.mitchellh.ghostty",
 ]);
 
+/** Never operated, whatever a show's limits say: these reach your AI sessions, your settings and your passwords. */
+const NEVER_APPS = new Set(["claude", "com.anthropic.claudefordesktop", "system settings", "com.apple.systempreferences", "keychain access", "com.apple.keychainaccess", "passwords", "com.apple.passwords"]);
+
 export function appAllowed(limits: Limits, app: string, bundleId: string): boolean {
+  if (NEVER_APPS.has(app.toLowerCase()) || NEVER_APPS.has(bundleId.toLowerCase())) return false;
   return limits.apps.some((a) => a.toLowerCase() === app.toLowerCase() || a === bundleId);
 }
 

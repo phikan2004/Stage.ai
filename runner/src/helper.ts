@@ -30,6 +30,12 @@ async function build(): Promise<void> {
   await promisify(execFile)("swiftc", ["-swift-version", "5", "-O", "-o", BINARY, SOURCE]);
 }
 
+/** What the presenter did during a recording. Password fields come through as `secure`, with no content. */
+export type Input =
+  | { kind: "click"; t: number; x: number; y: number; button: string; app: string; role?: string; name?: string }
+  | { kind: "key"; t: number; app: string; text?: string; combo?: string }
+  | { kind: "secure"; t: number };
+
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void };
 
 /** The running Swift helper. One request at a time per id, replies matched by id. */
@@ -37,6 +43,7 @@ export class Helper {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private hotkeyHandlers = new Set<(name: string) => void>();
+  private inputHandlers = new Set<(input: Input) => void>();
 
   private constructor(private proc: ChildProcessWithoutNullStreams) {
     createInterface({ input: proc.stdout }).on("line", (line) => this.receive(line));
@@ -56,6 +63,10 @@ export class Helper {
     const msg = JSON.parse(line);
     if (msg.event === "hotkey") {
       for (const h of this.hotkeyHandlers) h(msg.name);
+      return;
+    }
+    if (msg.event === "input") {
+      for (const h of this.inputHandlers) h(msg);
       return;
     }
     const p = this.pending.get(msg.id);
@@ -82,6 +93,15 @@ export class Helper {
     await this.call("hotkeys");
     this.hotkeyHandlers.add(handler);
     return () => this.hotkeyHandlers.delete(handler);
+  }
+
+  async record(handler: (input: Input) => void): Promise<() => Promise<void>> {
+    this.inputHandlers.add(handler);
+    await this.call("record", { on: true });
+    return async () => {
+      this.inputHandlers.delete(handler);
+      await this.call("record", { on: false });
+    };
   }
 
   stop() {

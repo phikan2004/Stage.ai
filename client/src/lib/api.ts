@@ -13,6 +13,8 @@ import type {
   MatterDetail,
   RunDetail,
   RunInput,
+  Show,
+  ShowPatch,
   SlideFacts,
 } from "../../../shared/schema";
 
@@ -37,6 +39,12 @@ const MIME: Record<DeckFormat, string> = {
 
 export const api = {
   home: () => fetch("/api/home").then(json<HomeData>),
+
+  shows: (matterId: string) => fetch(`/api/matters/${matterId}/shows`).then(json<Show[]>),
+  createShow: (matterId: string, name: string) => fetch(`/api/matters/${matterId}/shows`, send("POST", { name })).then(json<Show>),
+  show: (id: string) => fetch(`/api/shows/${id}`).then(json<Show>),
+  patchShow: (id: string, patch: ShowPatch) => fetch(`/api/shows/${id}`, send("PATCH", patch)).then(json<Show>),
+  deleteShow: (id: string) => fetch(`/api/shows/${id}`, send("DELETE")).then(json<void>),
 
   createMatter: (name: string, deckMode: DeckMode = "multiple") => fetch("/api/matters", send("POST", { name, deckMode })).then(json<Matter>),
   matter: (id: string) => fetch(`/api/matters/${id}`).then(json<MatterDetail>),

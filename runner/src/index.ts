@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,7 @@ import { Helper, stageDisplay, type Display } from "./helper.ts";
 import { claudeModel, estimateCost, modelName } from "./model.ts";
 import type { Limits } from "./safety.ts";
 import { startConsoleServer } from "./server.ts";
+import { StageSession } from "./session.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 dotenv.config({ path: join(root, ".env"), quiet: true, override: true });
@@ -33,7 +34,7 @@ const { values: args } = parseArgs({
 });
 
 const DATA_DIR = process.env.DATA_DIR || join(root, "data");
-const CONSOLE_ORIGINS = ["http://localhost:5173"];
+const CONSOLE_ORIGINS = ["http://localhost:5180"];
 const PORT = Number(process.env.STAGE_PORT) || 8788;
 
 async function requireDesktop(helper: Helper): Promise<Display> {
@@ -152,16 +153,75 @@ async function goal(helper: Helper, text: string) {
   await driver.close();
 }
 
-async function serve(helper: Helper) {
-  const stop = new AbortController();
+/** Kept between launches, so the console only has to pair once. */
+async function pairingToken(): Promise<string> {
+  const path = join(DATA_DIR, "stage-token");
+  const saved = await readFile(path, "utf8").catch(() => "");
+  if (saved.trim()) return saved.trim();
   const token = randomBytes(16).toString("hex");
-  const server = await startConsoleServer({ port: PORT, origins: CONSOLE_ORIGINS, token, onMessage: (m) => m.type === "stop" && stop.abort() });
-  console.log(`Stage runner on ${server.url}`);
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(path, token, { mode: 0o600 });
+  return token;
+}
+
+async function serve(helper: Helper) {
+  const display = await requireDesktop(helper);
+  const token = await pairingToken();
+  let session: StageSession | null = null;
+  const server = await startConsoleServer({
+    port: PORT,
+    origins: CONSOLE_ORIGINS,
+    token,
+    onMessage: (m) => session?.handle(m),
+    onConnect: () => session?.status(),
+    frame: (path) => session?.frame(path) ?? Promise.resolve(null),
+  });
+  session = new StageSession(helper, display, join(DATA_DIR, "recordings"), server.broadcast);
+  await helper.onHotkey((name) => session?.hotkey(name));
+  console.log(`Stage runner ready, audience display: ${display.name}.\nFirst time? Pair the console: ${CONSOLE_ORIGINS[0]}/#/pair/${token}`);
   process.on("SIGINT", () => {
     server.close();
     helper.stop();
     process.exit(0);
   });
+}
+
+/** Proves the safety controls on the real Mac: the display fence, the clicker, and the stop key. */
+async function safetyCheck(helper: Helper, driver: Driver) {
+  const results: Record<string, boolean | string> = {};
+  try {
+    await driver.look();
+    await driver.click("left", 99_999, 10);
+    results.fence = false;
+  } catch {
+    results.fence = true;
+  }
+  const waitFor = (name: string, ms: number) =>
+    new Promise<number | null>((resolve) => {
+      const started = performance.now();
+      const timer = setTimeout(() => (off(), resolve(null)), ms);
+      let off = () => {};
+      helper.onHotkey((h) => {
+        if (h !== name) return;
+        clearTimeout(timer);
+        off();
+        resolve(Math.round(performance.now() - started));
+      }).then((o) => (off = o));
+    });
+  console.log("Press PageDown (or your clicker's next button) within 15 seconds.");
+  results.clicker = (await waitFor("advance", 15_000)) !== null;
+  console.log("The cursor will now circle on the stage display. Press Esc twice quickly to stop it, within 20 seconds.");
+  const { shot } = await driver.look();
+  let stopped = false;
+  const stopping = waitFor("stop", 20_000).then((ms) => (stopped = ms !== null));
+  for (let i = 0; !stopped && i < 40; i++) {
+    const a = (i / 8) * Math.PI;
+    await driver.move(shot.width / 2 + 200 * Math.cos(a), shot.height / 2 + 200 * Math.sin(a));
+  }
+  await stopping;
+  results.stop = stopped;
+  console.log(`Safety check: ${JSON.stringify(results)}`);
+  console.log(Object.values(results).every(Boolean) ? "PASS" : "FAIL");
 }
 
 const helper = await Helper.start();
@@ -176,8 +236,14 @@ try {
     await driver.close();
   } else if (args.try) {
     const run = TRIES[args.try];
-    if (!run) throw new Error(`--try takes ${Object.keys(TRIES).join(", ")}`);
+    if (!run && args.try !== "safety") throw new Error(`--try takes ${[...Object.keys(TRIES), "safety"].join(", ")}`);
     const driver = await openDriver(helper, limitsFromArgs());
+    if (!run) {
+      await safetyCheck(helper, driver);
+      await driver.close();
+      helper.stop();
+      process.exit(0);
+    }
     await run(driver);
     await new Promise((r) => setTimeout(r, 1500));
     await driver.close();

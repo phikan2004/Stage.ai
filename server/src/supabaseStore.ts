@@ -24,6 +24,8 @@ import {
   type RunEvent,
   type RunInput,
   type RunSummary,
+  type Show,
+  type ShowPatch,
   type Slide,
   type UsageEntry,
   type UsageSummary,
@@ -255,6 +257,30 @@ function serialize(sql: postgres.Sql): postgres.Sql {
   const begin = (fn: (tx: postgres.TransactionSql) => unknown) => enqueue(() => sql.begin(fn));
   return Object.assign(tag, { begin }) as unknown as postgres.Sql;
 }
+
+interface ShowRow {
+  id: string;
+  matter_id: string;
+  name: string;
+  beats: Show["beats"];
+  limits: Show["limits"];
+  recording_id: string | null;
+  dry_runs: Show["dryRuns"];
+  created_at: Date;
+  updated_at: Date;
+}
+
+const toShow = (r: ShowRow): Show => ({
+  id: r.id,
+  matterId: r.matter_id,
+  name: r.name,
+  beats: r.beats,
+  limits: r.limits,
+  recordingId: r.recording_id,
+  dryRuns: r.dry_runs,
+  createdAt: r.created_at.getTime(),
+  updatedAt: r.updated_at.getTime(),
+});
 
 /**
  * Matters, decks, regions and runs in the `producer` Postgres schema (see supabase/migrations), deck files and thumbnails
@@ -546,5 +572,49 @@ export class SupabaseStore implements Library {
     if (!isId(id)) return false;
     const r = await this.sql`delete from producer.runs where id = ${id}`;
     return r.count > 0;
+  }
+
+  /* ---------- shows ---------- */
+
+  async shows(matterId: string): Promise<Show[] | null> {
+    if (!isId(matterId)) return null;
+    const [m] = await this.sql<MatterRow[]>`select * from producer.matters where id = ${matterId}`;
+    if (!m) return null;
+    const rows = await this.sql<ShowRow[]>`select * from producer.shows where matter_id = ${matterId} order by updated_at desc`;
+    return rows.map(toShow);
+  }
+
+  async show(id: string): Promise<Show | null> {
+    if (!isId(id)) return null;
+    const [r] = await this.sql<ShowRow[]>`select * from producer.shows where id = ${id}`;
+    return r ? toShow(r) : null;
+  }
+
+  async createShow(matterId: string, name: string): Promise<Show | null> {
+    if (!isId(matterId)) return null;
+    const [r] = await this.sql<ShowRow[]>`
+      insert into producer.shows (matter_id, name)
+      select id, ${name} from producer.matters where id = ${matterId} returning *`;
+    return r ? toShow(r) : null;
+  }
+
+  async patchShow(id: string, patch: ShowPatch): Promise<Show | null> {
+    if (!isId(id)) return null;
+    const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
+    const [r] = await this.sql<ShowRow[]>`
+      update producer.shows set
+        name = coalesce(${patch.name ?? null}, name),
+        beats = coalesce(${json(patch.beats)}::jsonb, beats),
+        limits = coalesce(${json(patch.limits)}::jsonb, limits),
+        recording_id = coalesce(${patch.recordingId ?? null}, recording_id),
+        dry_runs = coalesce(${json(patch.dryRuns)}::jsonb, dry_runs)
+      where id = ${id} returning *`;
+    return r ? toShow(r) : null;
+  }
+
+  async deleteShow(id: string): Promise<boolean> {
+    if (!isId(id)) return false;
+    const deleted = await this.sql`delete from producer.shows where id = ${id}`;
+    return deleted.count > 0;
   }
 }
