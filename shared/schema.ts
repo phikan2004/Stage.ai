@@ -11,7 +11,7 @@ export const BoxSchema = z.object({
 export type Box = z.infer<typeof BoxSchema>;
 
 /** How a region is emphasized while presenting. Regions with no cue are from before planning, and zoom. */
-export const CueSchema = z.enum(["outline", "zoom"]);
+export const CueSchema = z.enum(["outline", "spotlight", "zoom", "highlight", "callout", "arrow", "reveal"]);
 export type Cue = z.infer<typeof CueSchema>;
 
 export const RegionSchema = z.object({
@@ -23,8 +23,17 @@ export const RegionSchema = z.object({
   cue: CueSchema.optional(),
   /** things a presenter would say when reaching this point; hearing one counts as strong evidence */
   phrases: z.array(z.string().min(1)).optional(),
+  /** where a Highlight cue draws: each line of text in the box */
+  marks: z.array(BoxSchema).optional(),
 });
 export type Region = z.infer<typeof RegionSchema>;
+
+/** What a PowerPoint file states outright, so it costs nothing to know. PDFs and scans have none of this. */
+export const SlideFactsSchema = z.object({
+  notes: z.string().max(4000),
+  shapes: z.array(z.object({ text: z.string().max(400), box: BoxSchema })).max(40),
+});
+export type SlideFacts = z.infer<typeof SlideFactsSchema>;
 
 /** A slide is guided when its regions came from the director: they run in order and need real evidence to fire. */
 export const isGuided = (regions: Region[]) => regions.some((r) => r.cue !== undefined);
@@ -198,6 +207,8 @@ export const DeckPatchSchema = z.object({
 /** Slide images for the director pass: small enough that a whole deck fits in one request. */
 export const DeckPlanRequestSchema = z.object({
   images: z.array(z.string().startsWith("data:image/")).min(1).max(150),
+  /** one entry per image, when the deck is a PowerPoint */
+  facts: z.array(SlideFactsSchema).optional(),
 });
 
 export type DeckPatch = z.infer<typeof DeckPatchSchema>;

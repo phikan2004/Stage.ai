@@ -1,3 +1,5 @@
+import type { Cue } from "./schema.ts";
+
 /**
  * What each plan's analysis uses. `premium` is the highest quality; `free` keeps the core experience by analyzing each
  * slide on its own with a cheaper model. There are no accounts yet, so the whole app runs on one plan (PRODUCER_PLAN).
@@ -18,6 +20,21 @@ export interface Plan {
 export const PLANS: Record<PlanId, Plan> = {
   free: { id: "free", model: "claude-sonnet-5-5", effort: "medium", director: false, directorEffort: "medium" },
   premium: { id: "premium", model: "claude-opus-5-5", effort: "high", director: true, directorEffort: "xhigh" },
+};
+
+/**
+ * How hard Claude thinks about a cue someone drew, by what the cue needs. Lighter cues only need to know how the
+ * presenter will refer to the area; a Zoom or Callout is read closely, because the audience studies what it shows.
+ * Highlight lines and Reveal covers come from the slide image in the browser, so those cost no Claude time at all.
+ */
+export const CUE_EFFORT: Record<Cue, Effort> = {
+  outline: "low",
+  spotlight: "low",
+  arrow: "low",
+  reveal: "low",
+  highlight: "medium",
+  zoom: "medium",
+  callout: "medium",
 };
 
 export const planFor = (id: string | undefined): Plan => (id === "free" ? PLANS.free : PLANS.premium);

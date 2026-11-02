@@ -5,11 +5,14 @@
 alter table producer.decks add column if not exists plan jsonb;
 
 alter table producer.regions
-  add column if not exists cue text check (cue in ('outline', 'zoom')),
-  add column if not exists phrases text[] not null default '{}';
+  add column if not exists cue text check (cue in ('outline', 'spotlight', 'zoom', 'highlight', 'callout', 'arrow', 'reveal')),
+  add column if not exists phrases text[] not null default '{}',
+  -- where a Highlight cue draws: each line of text in the box
+  add column if not exists marks jsonb;
 comment on column producer.regions.cue is 'How the region is emphasized. Null for regions from before the director, which zoom.';
 
-alter table producer.run_events add column if not exists cue text check (cue in ('outline', 'zoom'));
+alter table producer.run_events
+  add column if not exists cue text check (cue in ('outline', 'spotlight', 'zoom', 'highlight', 'callout', 'arrow', 'reveal'));
 
 create table if not exists producer.analysis_usage (
   id uuid primary key default gen_random_uuid(),

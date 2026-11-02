@@ -1,4 +1,5 @@
 import type {
+  Cue,
   DeckDetail,
   DeckFormat,
   DeckPatch,
@@ -11,6 +12,7 @@ import type {
   MatterDetail,
   RunDetail,
   RunInput,
+  SlideFacts,
 } from "../../../shared/schema";
 
 async function json<T>(res: Response): Promise<T> {
@@ -51,10 +53,10 @@ export const api = {
   /** keepalive lets a save started during unload finish (bodies up to 64 KB). */
   patchDeck: (id: string, patch: DeckPatch, keepalive = false) =>
     fetch(`/api/decks/${id}`, send("PATCH", patch, { keepalive })).then(json<DeckRecord>),
-  planDeck: (id: string, images: string[], signal?: AbortSignal) =>
-    fetch(`/api/decks/${id}/plan`, send("POST", { images }, { signal })).then(json<DeckPlan>),
-  describeRegion: (deckId: string, slideIndex: number, label: string, image: string) =>
-    fetch("/api/analyze/region", send("POST", { image, label, deckId, slideIndex })).then(json<RegionDetails>),
+  planDeck: (id: string, images: string[], facts: SlideFacts[] | undefined, signal?: AbortSignal) =>
+    fetch(`/api/decks/${id}/plan`, send("POST", { images, facts }, { signal })).then(json<DeckPlan>),
+  describeRegion: (deckId: string, slideIndex: number, label: string, cue: Cue, image: string, notes?: string) =>
+    fetch("/api/analyze/region", send("POST", { image, label, cue, deckId, slideIndex, notes })).then(json<RegionDetails>),
   deleteDeck: (id: string) => fetch(`/api/decks/${id}`, send("DELETE")).then(json<void>),
   deckFile: async (id: string) => {
     const res = await fetch(`/api/decks/${id}/file`);

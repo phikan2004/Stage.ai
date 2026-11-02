@@ -1,4 +1,4 @@
-import type { Region } from "../../../shared/schema";
+import type { Region, SlideFacts } from "../../../shared/schema";
 
 export type SlideStatus =
   | { state: "pending" }
@@ -9,6 +9,7 @@ export type SlideStatus =
 export interface SlideRef {
   deckId: string;
   slideIndex: number;
+  facts?: SlideFacts;
 }
 
 export async function analyzeImage(image: string, ref: SlideRef, signal?: AbortSignal): Promise<Region[]> {

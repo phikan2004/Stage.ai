@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { Region } from "../../../shared/schema";
+import type { Region, SlideFacts } from "../../../shared/schema";
 import { analyzeAll } from "./analyzeQueue";
 import { api } from "./api";
 import { planImages, type Deck } from "./deck";
+import { highlightMarks } from "./textLines";
 
 interface Options {
   deckId: string;
@@ -37,7 +38,8 @@ export function useSuggestCues({ deckId, deck, planned, onRegions }: Options) {
     if (health.director && !hasPlan.current) {
       setProgress("Reading the whole deck…");
       try {
-        await api.planDeck(deckId, await planImages(deck.images), ctrl.signal);
+        const facts = deck.images.every((img) => img.facts) ? deck.images.map((img) => img.facts as SlideFacts) : undefined;
+        await api.planDeck(deckId, await planImages(deck.images), facts, ctrl.signal);
         hasPlan.current = true;
       } catch (e) {
         if (ctrl.signal.aborted) return;
@@ -51,14 +53,20 @@ export function useSuggestCues({ deckId, deck, planned, onRegions }: Options) {
     setProgress(`Suggesting cues: 0 of ${indices.length} slides`);
     await analyzeAll(
       indices.map((i) => deck.images[i].url),
-      indices.map((slideIndex) => ({ deckId, slideIndex })),
+      indices.map((slideIndex) => ({ deckId, slideIndex, facts: deck.images[slideIndex].facts })),
       (k, status, regions) => {
         if (status.state === "error") failed++;
         if (status.state !== "done" && status.state !== "error") return;
         setProgress(`Suggesting cues: ${++done} of ${indices.length} slides`);
         if (!regions) return;
         added += regions.length;
-        onRegions(indices[k], regions.map((r) => ({ ...r, cue: r.cue ?? "outline" })));
+        const slide = indices[k];
+        const cued = regions.map((r) => ({ ...r, cue: r.cue ?? ("outline" as const) }));
+        onRegions(slide, cued);
+        // Highlights need their lines worked out from the slide, which happens right here in the browser.
+        Promise.all(cued.map(async (r) => (r.cue === "highlight" ? { ...r, marks: await highlightMarks(deck.images[slide], r.box) } : r)))
+          .then((marked) => cued.some((r) => r.cue === "highlight") && onRegions(slide, marked))
+          .catch(() => {});
       },
       { concurrency: 2, signal: ctrl.signal },
     );

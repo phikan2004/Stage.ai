@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { clampBox, normalizeRegions, type Box, type Cue, type Region } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { markRegion, type Deck } from "../lib/deck";
+import { CUES } from "../lib/cues";
 import { placePopup } from "../lib/popupPosition";
+import { highlightMarks } from "../lib/textLines";
 import { useSuggestCues } from "../lib/useSuggestCues";
 import { hue } from "../lib/useConfig";
 
@@ -89,16 +91,27 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
     const region = slides.current[slide]?.regions.find((r) => r.id === id);
     if (!region) return;
     try {
-      const details = await api.describeRegion(deckId, slide, region.label, await markRegion(deck.images[slide], region.box));
+      const img = deck.images[slide];
+      const [details, marks] = await Promise.all([
+        api.describeRegion(deckId, slide, region.label, region.cue ?? "outline", await markRegion(img, region.box), img.facts?.notes),
+        region.cue === "highlight" ? highlightMarks(img, region.box) : undefined,
+      ]);
       const current = slides.current[slide]?.regions ?? [];
       onRegions(
         slide,
-        current.map((r) => (r.id === id ? { ...r, ...details } : r)),
+        current.map((r) => (r.id === id ? { ...r, ...details, ...(marks ? { marks } : {}) } : r)),
       );
     } catch (e) {
       // The label still works as a trigger, so a failure here doesn't lose the cue.
       console.error("couldn't describe region", e);
     }
+  };
+
+  /** Switching a saved cue to Highlight only needs its lines, which come from the slide with no Claude call. */
+  const refreshMarks = async (slide: number, region: Region) => {
+    const marks = await highlightMarks(deck.images[slide], region.box);
+    const current = slides.current[slide]?.regions ?? [];
+    onRegions(slide, current.map((r) => (r.id === region.id ? { ...r, marks } : r)));
   };
 
   const describeSoon = (slide: number, id: string) => {
@@ -309,7 +322,11 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
               cue={pending ? pending.cue : (sel!.cue ?? "zoom")}
               at={popupAt}
               onLabel={(label) => (pending ? setPending({ ...pending, label }) : patch(sel!.id, { label }))}
-              onCue={(cue) => (pending ? setPending({ ...pending, cue }) : patch(sel!.id, { cue }))}
+              onCue={(cue) => {
+                if (pending) return setPending({ ...pending, cue });
+                patch(sel!.id, { cue });
+                if (cue === "highlight") refreshMarks(index, sel!);
+              }}
               onClose={closePopup}
               onCancel={() => {
                 setPending(null);
@@ -329,11 +346,6 @@ interface Pending {
   label: string;
   cue: Cue;
 }
-
-const CUES: [Cue, string][] = [
-  ["outline", "Outline"],
-  ["zoom", "Zoom"],
-];
 
 function DraftBox({ box }: { box: Box }) {
   return <div className="draft" style={{ left: pct(box.x), top: pct(box.y), width: pct(box.w), height: pct(box.h) }} />;

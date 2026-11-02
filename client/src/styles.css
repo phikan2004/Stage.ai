@@ -265,13 +265,14 @@ a.btn { text-decoration: none; color: var(--ink); }
   font-size: 13px; line-height: 17px; text-align: center; cursor: pointer;
 }
 .cue-popup {
-  position: absolute; z-index: 5; width: 216px; padding: 12px; display: grid; gap: 10px;
+  position: absolute; z-index: 5; width: 244px; padding: 12px; display: grid; gap: 10px;
   background: var(--card); border: 1px solid var(--rule); border-radius: 12px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
 }
 .cue-popup label { display: grid; gap: 4px; }
-.cue-popup .seg { display: flex; margin-top: 4px; }
-.cue-popup .seg button { flex: 1; }
+.cue-popup .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; border: 0; border-radius: 0; padding: 0; }
+.cue-popup .seg button { border: 1px solid var(--rule-strong); }
+.cue-popup .seg button.on { border-color: var(--ink); }
 .draft { position: absolute; border: 1.5px dashed var(--accent); background: rgba(244, 80, 30, 0.08); pointer-events: none; }
 .hint { color: var(--muted); font-size: 12px; }
 
@@ -306,6 +307,31 @@ a.btn { text-decoration: none; color: var(--ink); }
   border-radius: 6px;
   pointer-events: none;
 }
+.cue-cover { position: absolute; pointer-events: none; }
+.cue-mark {
+  position: absolute;
+  background: rgba(255, 214, 10, 0.5);
+  mix-blend-mode: multiply;
+  border-radius: 3px;
+  transform-origin: left center;
+  pointer-events: none;
+}
+.cue-arrow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.cue-arrow line { stroke: var(--accent); stroke-width: 1; stroke-linecap: round; }
+.cue-callout {
+  position: absolute;
+  max-width: 40%;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: clamp(12px, 1.5vw, 22px);
+  font-weight: 500;
+  border-radius: 8px;
+  white-space: nowrap;
+  transform: translate(-50%, -115%);
+  pointer-events: none;
+}
+.cue-callout.below { transform: translate(-50%, 15%); }
 .cue-outline {
   position: absolute;
   border: 3px solid var(--accent);

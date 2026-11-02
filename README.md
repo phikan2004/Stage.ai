@@ -138,6 +138,18 @@ title or simple slides, picks `outline` or `zoom` for each, and puts them in spe
 exactly those items and writes the phrases a presenter would say. A slide with nothing planned makes no Claude call. If
 planning fails, slides are analyzed one at a time.
 
+**Cue types:** Outline, Spotlight (dims the rest), Zoom, Highlight (a marker sweep over each line of text), Callout (an
+outline plus the label), Arrow, and Reveal (hidden until the presenter reaches it). `client/src/components/CueOverlay.tsx`
+draws them.
+
+**PowerPoint files state a lot outright**, so reading it costs nothing: `renderPptx` collects each slide's speaker notes
+and exact text boxes (`SlideFacts`). Claude reads slide images as usual and gets these alongside, so its plan follows the
+notes and its boxes match the real text. PDFs and scans have no such data, so boxes there are estimates.
+
+**Analysis depth follows the cue.** `CUE_EFFORT` in `shared/plans.ts` sets how hard Claude thinks about a drawn cue: low
+for cues that only need to know how the area will be referred to, medium for Zoom, Callout and Highlight. Highlight lines
+(`findLines`) and Reveal covers come from the slide image in the browser, with no API call.
+
 **Cues** come from dragging on a slide in Review or from **Suggest cues**, which only fills slides that have no cues, so
 anything you drew stays. The popup asks for just a label and a cue type, and a box you leave unnamed disappears without being saved. Once a cue
 has a label, Claude reads the marked area in the background (`POST /api/analyze/region`) to work out its keywords and

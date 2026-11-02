@@ -1,14 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { costUsd, planFor, type Effort, type Plan, type TokenUsage } from "../../shared/plans.ts";
+import { costUsd, CUE_EFFORT, planFor, type Effort, type Plan, type TokenUsage } from "../../shared/plans.ts";
 import {
   AnalysisSchema,
+  CueSchema,
   GuidedAnalysisSchema,
   normalizeRegions,
   RegionDetailsSchema,
+  type Cue,
   type DeckPlan,
   type Region,
   type RegionDetails,
+  type SlideFacts,
   type SlidePlan,
   type UsageEntry,
 } from "../../shared/schema.ts";
@@ -16,6 +19,7 @@ import {
   DIRECTOR_PROMPT,
   DIRECTOR_SCHEMA,
   directorPrompt,
+  factsPrompt,
   GUIDED_PROMPT,
   GUIDED_SCHEMA,
   guidedPrompt,
@@ -133,7 +137,7 @@ const RawPlan = z.object({
       slide: z.number().int(),
       purpose: z.string(),
       density: z.enum(["clean", "busy"]),
-      emphasis: z.array(z.object({ target: z.string().min(1), cue: z.enum(["outline", "zoom"]), why: z.string() })),
+      emphasis: z.array(z.object({ target: z.string().min(1), cue: CueSchema, why: z.string() })),
     }),
   ),
 });
@@ -151,12 +155,16 @@ function toPlan(json: unknown, slideCount: number): DeckPlan {
 }
 
 /** The director pass: read the whole deck and decide what deserves emphasis on each slide. */
-export async function planDeck(images: string[], onUsage: UsageSink): Promise<DeckPlan> {
+export async function planDeck(images: string[], facts: SlideFacts[] | undefined, onUsage: UsageSink): Promise<DeckPlan> {
   requireKey();
-  const content: Anthropic.Beta.BetaContentBlockParam[] = images.flatMap((url, i) => [
-    { type: "text" as const, text: `Slide ${i + 1}:` },
-    imageBlock(url),
-  ]);
+  const content: Anthropic.Beta.BetaContentBlockParam[] = images.flatMap((url, i) => {
+    const notes = facts?.[i]?.notes;
+    return [
+      { type: "text" as const, text: `Slide ${i + 1}:` },
+      imageBlock(url),
+      ...(notes ? [{ type: "text" as const, text: `Speaker notes for slide ${i + 1}:\n${notes}` }] : []),
+    ];
+  });
   return withRetry("plan", async (retryError) =>
     toPlan(
       await callModel({
@@ -188,16 +196,22 @@ function validateGuided(json: unknown, slide: SlidePlan): Region[] {
 }
 
 /** Work out a drawn cue's keywords and phrases. `image` is the slide with the region marked in red. */
-export async function describeRegion(image: string, label: string, slideIndex: number | null, onUsage: UsageSink): Promise<RegionDetails> {
+export async function describeRegion(
+  image: string,
+  label: string,
+  cue: Cue,
+  notes: string | undefined,
+  slideIndex: number | null,
+  onUsage: UsageSink,
+): Promise<RegionDetails> {
   requireKey();
   return withRetry("region", async (retryError) =>
     RegionDetailsSchema.parse(
       await callModel({
         system: REGION_PROMPT,
         schema: REGION_SCHEMA,
-        content: [imageBlock(image), { type: "text", text: regionPrompt(label, retryError) }],
-        // Reading one marked area takes far less judgment than planning a deck.
-        effort: "medium",
+        content: [imageBlock(image), { type: "text", text: regionPrompt(label, notes, retryError) }],
+        effort: CUE_EFFORT[cue],
         maxTokens: 4000,
         usage: (u) => onUsage({ ...u, kind: "region", slideIndex }),
       }),
@@ -209,22 +223,24 @@ export interface SlideContext {
   slideIndex: number | null;
   /** present when the director planned this slide */
   plan?: { summary: string; slide: SlidePlan };
+  /** what the file itself says about this slide, for PowerPoint decks */
+  facts?: SlideFacts;
   onUsage: UsageSink;
 }
 
 /** Find a slide's regions; validate and retry once with the error fed back. */
-export async function analyzeSlide(image: string, { slideIndex, plan, onUsage }: SlideContext): Promise<Region[]> {
+export async function analyzeSlide(image: string, { slideIndex, plan, facts, onUsage }: SlideContext): Promise<Region[]> {
   // The director chose nothing here, so there's nothing to find and nothing to pay for.
   if (plan && plan.slide.emphasis.length === 0) return [];
   requireKey();
   const usage = (u: Parameters<Call["usage"]>[0]) => onUsage({ ...u, kind: "slide", slideIndex });
   return withRetry("regions", async (retryError) => {
     if (plan) {
-      const content = [imageBlock(image), { type: "text" as const, text: guidedPrompt(plan.summary, plan.slide, retryError) }];
+      const content = [imageBlock(image), { type: "text" as const, text: guidedPrompt(plan.summary, plan.slide, facts, retryError) }];
       const json = await callModel({ system: GUIDED_PROMPT, schema: GUIDED_SCHEMA, content, effort: effort(), maxTokens: 16000, usage });
       return validateGuided(json, plan.slide);
     }
-    const content = [imageBlock(image), { type: "text" as const, text: userPrompt(retryError) }];
+    const content = [imageBlock(image), { type: "text" as const, text: `${userPrompt(retryError)}${retryError ? "" : factsPrompt(facts)}` }];
     return validate(await callModel({ system: SYSTEM_PROMPT, schema: RESPONSE_SCHEMA, content, effort: effort(), maxTokens: 16000, usage }));
   });
 }

@@ -5,6 +5,7 @@ import {
   normalizeRegions,
   summarizeRun,
   type DeckCreate,
+  type Box,
   type Cue,
   type DeckDetail,
   type DeckFormat,
@@ -112,6 +113,7 @@ interface RegionRow {
   keywords: string[];
   cue: Cue | null;
   phrases: string[];
+  marks: Box[] | null;
   box_x: number;
   box_y: number;
   box_w: number;
@@ -172,6 +174,7 @@ function toSlides(slideCount: number, rows: RegionRow[]): Slide[] {
       box: { x: r.box_x, y: r.box_y, w: r.box_w, h: r.box_h },
       ...(r.cue ? { cue: r.cue } : {}),
       ...(r.phrases.length ? { phrases: r.phrases } : {}),
+      ...(r.marks ? { marks: r.marks } : {}),
     });
   }
   return slides;
@@ -225,6 +228,7 @@ function regionRows(slides: Slide[], slideCount: number) {
         keywords: r.keywords,
         cue: r.cue ?? null,
         phrases: r.phrases ?? [],
+        marks: r.marks ?? null,
         box_x: r.box.x,
         box_y: r.box.y,
         box_w: r.box.w,
@@ -438,12 +442,12 @@ export class SupabaseStore implements Library {
         if (rows.length) {
           await tx`
             insert into producer.regions
-              (deck_id, slide_index, position, region_key, label, description, keywords, cue, phrases, box_x, box_y, box_w, box_h)
-            select ${id}, x.slide_index, x.position, x.region_key, x.label, x.description, x.keywords, x.cue, x.phrases,
+              (deck_id, slide_index, position, region_key, label, description, keywords, cue, phrases, marks, box_x, box_y, box_w, box_h)
+            select ${id}, x.slide_index, x.position, x.region_key, x.label, x.description, x.keywords, x.cue, x.phrases, x.marks,
                    x.box_x, x.box_y, x.box_w, x.box_h
             from jsonb_to_recordset(${tx.json(rows)}::jsonb) as x(
               slide_index int, position int, region_key text, label text, description text, keywords text[],
-              cue text, phrases text[], box_x float8, box_y float8, box_w float8, box_h float8)`;
+              cue text, phrases text[], marks jsonb, box_x float8, box_y float8, box_w float8, box_h float8)`;
         }
       }
       return (await this.deckRecord(id, tx))!.record;

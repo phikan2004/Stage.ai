@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
-import { DeckPlanRequestSchema } from "../../shared/schema.ts";
+import { CueSchema, DeckPlanRequestSchema, SlideFactsSchema } from "../../shared/schema.ts";
 import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, model, planDeck, type UsageSink } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
 import { FileStore, type Library } from "./store.ts";
@@ -58,9 +58,9 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/analyze", async (req, res) => {
-  const { image, deckId, slideIndex } = req.body ?? {};
+  const { image, deckId, slideIndex, facts } = req.body ?? {};
   if (typeof image !== "string" || !image.startsWith("data:image/")) {
-    res.status(400).json({ error: "Body must be { image: <data URL>, deckId?, slideIndex? }" });
+    res.status(400).json({ error: "Body must be { image: <data URL>, deckId?, slideIndex?, facts? }" });
     return;
   }
   try {
@@ -69,6 +69,7 @@ app.post("/api/analyze", async (req, res) => {
     const regions = await analyzeSlide(image, {
       slideIndex: typeof slideIndex === "number" ? slideIndex : null,
       plan: slide && deck?.plan ? { summary: deck.plan.summary, slide } : undefined,
+      facts: SlideFactsSchema.safeParse(facts).data,
       onUsage: recordUsage(deck?.id ?? null),
     });
     res.json({ regions });
@@ -78,14 +79,24 @@ app.post("/api/analyze", async (req, res) => {
 });
 
 app.post("/api/analyze/region", async (req, res) => {
-  const { image, label, deckId, slideIndex } = req.body ?? {};
-  if (typeof image !== "string" || !image.startsWith("data:image/") || typeof label !== "string" || !label.trim()) {
-    res.status(400).json({ error: "Body must be { image: <data URL>, label, deckId?, slideIndex? }" });
+  const { image, label, deckId, slideIndex, notes } = req.body ?? {};
+  const cue = CueSchema.safeParse(req.body?.cue);
+  if (typeof image !== "string" || !image.startsWith("data:image/") || typeof label !== "string" || !label.trim() || !cue.success) {
+    res.status(400).json({ error: "Body must be { image: <data URL>, label, cue, deckId?, slideIndex?, notes? }" });
     return;
   }
   try {
     const deck = typeof deckId === "string" ? await store.deck(deckId) : null;
-    res.json(await describeRegion(image, label.slice(0, 200), typeof slideIndex === "number" ? slideIndex : null, recordUsage(deck?.id ?? null)));
+    res.json(
+      await describeRegion(
+        image,
+        label.slice(0, 200),
+        cue.data,
+        typeof notes === "string" ? notes.slice(0, 4000) : undefined,
+        typeof slideIndex === "number" ? slideIndex : null,
+        recordUsage(deck?.id ?? null),
+      ),
+    );
   } catch (e) {
     sendAnalyzeError(res, e, "describe region");
   }
@@ -97,7 +108,7 @@ app.post("/api/decks/:id/plan", async (req, res) => {
   if (!currentPlan().director) return void res.status(409).json({ error: "Whole-deck planning isn't part of this plan." });
   try {
     if (!(await store.deck(req.params.id))) return void res.status(404).json({ error: "Presentation not found" });
-    const plan = await planDeck(body.data.images, recordUsage(req.params.id));
+    const plan = await planDeck(body.data.images, body.data.facts, recordUsage(req.params.id));
     await store.patchDeck(req.params.id, { plan });
     res.json(plan);
   } catch (e) {
