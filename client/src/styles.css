@@ -534,3 +534,6 @@ a.btn { text-decoration: none; color: var(--ink); }
 .library-search { background: var(--card); }
 .badge:not(.quiet) { background: var(--flare); color: #3a1608; }
 .brand-dot { background: var(--flare); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.card-start { text-align: left; font: inherit; color: inherit; }
+.card-start .card-img { background: transparent; border-bottom: 1px dashed var(--rule-strong); }
+.card-start .plus { font-family: var(--font-serif); font-size: 48px; line-height: 1; background: var(--flare); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }

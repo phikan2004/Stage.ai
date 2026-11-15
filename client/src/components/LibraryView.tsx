@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { DeckSummary, HomeData, MatterSummary, Show } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
@@ -176,8 +177,20 @@ function Overview({
             ),
           )}
         </div>
+      ) : q ? (
+        <div className="empty-row">Nothing matches “{query.trim()}”.</div>
       ) : (
-        <div className="empty-row">{q ? `Nothing matches “${query.trim()}”.` : `No ${what} yet. Add one with New.`}</div>
+        <div className="cards library">
+          <button className="card project-card card-start" onClick={() => startNew(tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo")}>
+            <div className="card-img">
+              <span className="plus">+</span>
+            </div>
+            <div className="card-body">
+              <div className="card-title">New {tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo"}</div>
+              <div className="hint">You don't have any {what} yet.</div>
+            </div>
+          </button>
+        </div>
       )}
 
       {tab === "decks" && data.matters.length === 0 && <SampleLine onError={onError} />}
@@ -496,11 +509,16 @@ function NewMenu({ projects, current }: { projects: MatterSummary[]; current?: M
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const pick = (kind: "project" | "deck" | "demo") => {
+  const pick = (kind: NewKind) => {
     setError(null);
     if (kind === "deck") input.current?.click();
     else setMaking(kind);
   };
+  useEffect(() => {
+    const on = (e: Event) => pick((e as CustomEvent<NewKind>).detail);
+    window.addEventListener(NEW_EVENT, on);
+    return () => window.removeEventListener(NEW_EVENT, on);
+  });
 
   return (
     <>
@@ -532,32 +550,38 @@ function NewMenu({ projects, current }: { projects: MatterSummary[]; current?: M
           if (list.length) setFiles(list);
         }}
       />
-      {making === "project" && (
-        <NameDialog
-          title="New project"
-          label="Name"
-          submitLabel="Create project"
-          onClose={() => setMaking(null)}
-          onSubmit={async (name) => {
-            const m = await api.createMatter(name);
-            setMaking(null);
-            go(projectPath(m.id));
-          }}
-        />
-      )}
-      {making === "demo" && <NewDemoDialog projects={projects} current={current} onClose={() => setMaking(null)} />}
-      {files && <AddDecksDialog files={files} projects={projects.filter(canTakeDeck)} current={current} onClose={() => setFiles(null)} onError={setError} />}
-      {error && (
-        <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setError(null)}>
-          <div className="dialog">
-            <div className="banner err">{error}</div>
-            <div className="dialog-actions">
-              <button className="btn primary" onClick={() => setError(null)}>
-                OK
-              </button>
+      {/* The top bar's blur would trap fixed dialogs inside it, so they render on the page itself. */}
+      {createPortal(
+        <>
+          {making === "project" && (
+            <NameDialog
+              title="New project"
+              label="Name"
+              submitLabel="Create project"
+              onClose={() => setMaking(null)}
+              onSubmit={async (name) => {
+                const m = await api.createMatter(name);
+                setMaking(null);
+                go(projectPath(m.id));
+              }}
+            />
+          )}
+          {making === "demo" && <NewDemoDialog projects={projects} current={current} onClose={() => setMaking(null)} />}
+          {files && <AddDecksDialog files={files} projects={projects.filter(canTakeDeck)} current={current} onClose={() => setFiles(null)} onError={setError} />}
+          {error && (
+            <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && setError(null)}>
+              <div className="dialog">
+                <div className="banner err">{error}</div>
+                <div className="dialog-actions">
+                  <button className="btn primary" onClick={() => setError(null)}>
+                    OK
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+        </>,
+        document.body,
       )}
     </>
   );
@@ -578,6 +602,11 @@ function ProjectSelect({ projects, value, onChange }: { projects: MatterSummary[
     </label>
   );
 }
+
+type NewKind = "project" | "deck" | "demo";
+const NEW_EVENT = "stage:new";
+/** Opens the New menu's flow for one kind, from anywhere on the page. */
+const startNew = (kind: NewKind) => window.dispatchEvent(new CustomEvent<NewKind>(NEW_EVENT, { detail: kind }));
 
 /** Where something new goes: the chosen project, or a hidden matter of its own. */
 const homeFor = async (projectId: string, name: string) => (projectId === NO_PROJECT ? (await api.createMatter(name, true)).id : projectId);
