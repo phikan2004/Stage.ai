@@ -33,6 +33,8 @@
   --font-display: "Inter Tight", "Inter", system-ui, -apple-system, sans-serif;
   /* an editorial serif, used sparingly: the wordmark, the accent word in headlines, big numbers */
   --font-serif: "Instrument Serif", Georgia, serif;
+  /* the wordmark keeps its own sturdier serif */
+  --font-brand: "Newsreader", Georgia, serif;
   color-scheme: light;
 }
 
@@ -131,7 +133,7 @@ textarea.field { resize: vertical; min-height: 64px; }
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
 }
-.brand { font-family: var(--font-serif); font-weight: 400; font-size: 30px; line-height: 1; letter-spacing: -0.01em; color: inherit; text-decoration: none; flex: none; }
+.brand { font-family: var(--font-brand); font-weight: 500; font-size: 32px; line-height: 1; letter-spacing: -0.03em; color: inherit; text-decoration: none; flex: none; }
 .brand-dot { color: var(--accent); }
 .crumbs { display: flex; align-items: center; min-width: 0; margin-left: 4px; font-size: 14px; }
 .crumb { display: inline-flex; align-items: center; min-width: 0; color: var(--ink); }
