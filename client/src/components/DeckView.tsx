@@ -143,7 +143,7 @@ export default function DeckView({ id }: { id: string }) {
 
   return (
     <div className="deck-page">
-      <TopBar tab="decks" crumbs={crumbs}>
+      <TopBar tab="decks" back="/" crumbs={crumbs}>
         {deck && (
           <>
             <span className={`save-state ${saveState}`}>

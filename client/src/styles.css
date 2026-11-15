@@ -1,15 +1,20 @@
 :root {
-  --paper: #fbfbfa;
+  --paper: #fafaf9;
   --card: #ffffff;
-  --sand: #f2f2f0;
-  --sage: #4f9a6e;
+  --sand: #f5f5f4;
+  /* the flare: gold into orange into ember, used sparingly */
+  --gold: #eab03f;
+  --orange: #f2922c;
+  --ember: #c9401a;
+  --flare: linear-gradient(100deg, var(--gold) 0%, var(--orange) 40%, #e5521f 72%, var(--ember) 100%);
+  --sage: #8fa936;
   --ink: #191919;
   --ink-2: #4f4f4d;
   --muted: #8e8e8a;
-  --rule: #ebebe9;
+  --rule: #ececea;
   --rule-strong: #dadad7;
-  --accent: #ff5a2c;
-  --accent-soft: #fff0eb;
+  --accent: #e5521f;
+  --accent-soft: #fdeee6;
   --stage: #1f2024;
   --ok: #4f7d5c;
   --warn: #b7791f;
@@ -17,7 +22,8 @@
   --radius: 14px;
   --font-ui: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
-  --font-display: "Newsreader", Georgia, serif;
+  --font-display: "Geist", system-ui, -apple-system, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
   color-scheme: light;
 }
 
@@ -40,11 +46,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
   color: var(--muted);
   font-weight: 500;
 }
-.display em { font-style: italic; color: var(--accent); }
+.display em { font-family: var(--font-serif); font-weight: 400; font-style: italic; letter-spacing: -0.02em; color: var(--accent); background: var(--flare); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; padding-right: 0.06em; }
 .display {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.025em;
+  font-weight: 600;
+  letter-spacing: -0.04em;
   line-height: 1.05;
 }
 .btn {
@@ -113,7 +119,7 @@ textarea.field { resize: vertical; min-height: 64px; }
   border-bottom: 1px solid var(--rule);
   background: var(--paper);
 }
-.brand { font-family: var(--font-display); font-size: 34px; line-height: 1; letter-spacing: -0.02em; color: inherit; text-decoration: none; flex: none; }
+.brand { font-family: var(--font-serif); font-weight: 500; font-size: 32px; line-height: 1; letter-spacing: -0.03em; color: inherit; text-decoration: none; flex: none; }
 .brand-dot { color: var(--accent); }
 .crumbs { display: flex; align-items: center; min-width: 0; margin-left: 8px; font-size: 13px; }
 .crumb { display: inline-flex; align-items: center; min-width: 0; color: var(--ink); }
@@ -122,15 +128,17 @@ textarea.field { resize: vertical; min-height: 64px; }
 .crumb a { color: var(--muted); text-decoration: none; }
 .crumb a:hover { color: var(--ink); }
 .topbar .spacer { flex: 1; }
+.back { flex: none; height: 30px; padding: 0 12px; margin-left: 8px; border: 1px solid var(--rule); border-radius: 999px; background: var(--card); color: var(--ink-2); font-size: 13px; cursor: pointer; }
+.back:hover { border-color: var(--rule-strong); color: var(--ink); }
 .tabs { display: flex; align-self: stretch; gap: 22px; margin-right: 8px; }
 .tabs a { display: flex; align-items: center; color: var(--muted); text-decoration: none; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs a:hover { color: var(--ink); }
-.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: transparent; border-image: var(--flare) 1; }
 
 /* ---------- pages: home, matter, run ---------- */
 .page { max-width: 1120px; margin: 0 auto; padding: 48px 24px 96px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
-.page-head h1 { font-size: 64px; margin: 8px 0 0; overflow-wrap: anywhere; }
+.page-head h1 { font-size: 56px; margin: 8px 0 0; overflow-wrap: anywhere; }
 .page-actions { display: flex; gap: 6px; }
 .page-status { padding: 64px 24px; text-align: center; }
 .btn.danger { color: var(--err); }
@@ -505,14 +513,12 @@ a.btn { text-decoration: none; color: var(--ink); }
 }
 
 /* ---------- furnishing: warm light, paper, stacked projects ---------- */
-/* One faint spark of the accent at the top; everything else stays neutral. */
-body { background: radial-gradient(700px 300px at 92% -140px, rgba(255, 90, 44, 0.1), rgba(255, 90, 44, 0) 70%), var(--paper); background-repeat: no-repeat; }
-.topbar { position: sticky; top: 0; z-index: 10; background: rgba(251, 251, 250, 0.82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.topbar { position: sticky; top: 0; z-index: 10; background: rgba(250, 250, 249, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .intro-line { font-size: 17px; }
 .card { border-radius: 16px; background: var(--card); box-shadow: 0 1px 0 rgba(29, 28, 26, 0.03); }
 .card:hover { box-shadow: 0 12px 32px rgba(15, 15, 15, 0.07); }
-.card-img { background: var(--sand); }
-.monogram { font-style: italic; color: #b4b4b0; }
+.card-img { background: linear-gradient(160deg, #f0f0ee, var(--sand)); }
+.monogram { color: #c4c4c0; }
 .hint { font-variant-numeric: tabular-nums; }
 .project-card { position: relative; overflow: visible; margin-top: 10px; }
 .project-card::before, .project-card::after { content: ""; position: absolute; left: 14px; right: 14px; height: 12px; border: 1px solid var(--rule); border-bottom: 0; border-radius: 14px 14px 0 0; background: var(--card); z-index: -1; }
@@ -523,6 +529,8 @@ body { background: radial-gradient(700px 300px at 92% -140px, rgba(255, 90, 44, 
 .beat-dots { position: absolute; left: 16px; right: 16px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 5px; }
 .beat-dots i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #c4c4c0; }
 .beat-dots i.done { background: var(--sage); border-color: var(--sage); }
-.beat-dots i.miss { background: var(--accent); border-color: var(--accent); }
+.beat-dots i.miss { background: var(--orange); border-color: var(--orange); }
 .tabs a { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
 .library-search { background: var(--card); }
+.badge:not(.quiet) { background: var(--flare); color: #3a1608; }
+.brand-dot { background: var(--flare); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }

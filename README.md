@@ -34,7 +34,8 @@ whole flow without calling the vision model.
 - **New** adds a project, a deck (PowerPoint or PDF, several at once) or a demo. A deck or demo goes into a project or
   stands on its own.
 - A **project** (`#/m/<id>`) lists its decks and demos as rows. Click one to see more, then open it. In the code and
-  database a project is still called a matter; a deck or demo on its own lives in a hidden one (`solo`).
+  database a project is still called a matter; a deck or demo on its own lives in a hidden one (`solo`). A demo's steps
+  are called cues in the app and beats in the code.
 - A demo's cover is a screenshot from its recording, chosen on the demo's page. It's served by the runner on your Mac,
   so it only shows while the runner is running.
 - A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
@@ -68,14 +69,14 @@ npm run stage
    saved in `data/recordings/`. To learn the demo, screenshots, what you typed and what you said are sent to Claude, and
    your voice goes to the speech service as you talk. Known key and password formats are hidden from that text, but
    screenshots are sent as they are, so keep real secrets off the stage display.
-2. **Review:** check the beats and the limits, including which risky buttons it may press. Add corrections in each
-   beat's notes.
-3. **Dry run:** the screen goes black while the AI gets ready, and the mic comes on. Say the first beat's cue (one of
-   its phrases or two of its words) and it performs that beat live. After that it follows you the way a person helping
-   would: once a beat is done, the next one runs as soon as you mention it, when you finish your thought (1.5 s quiet),
+2. **Review:** check the cues and the limits, including which risky buttons it may press. Add corrections in each
+   cue's notes.
+3. **Dry run:** the screen goes black while the AI gets ready, and the mic comes on. Say the first cue's trigger (one of
+   its phrases or two of its words) and it performs that cue live. After that it follows you the way a person helping
+   would: once a cue is done, the next one runs as soon as you mention it, when you finish your thought (1.5 s quiet),
    or after 3 s if you say nothing. A short "hold on", "wait" or "stop" holds it, and "go ahead" or "next" carries on.
    Those only count as a short sentence of their own, so "I can't wait to show you" won't hold it. Space, Return or the
-   Right arrow also move on. Each beat is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
+   Right arrow also move on. Each cue is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
    to its starting state yourself between runs.
 
 `stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using demos
@@ -103,7 +104,7 @@ Safety limits: the agent only acts in the apps and web origins you allow, on the
 terminal commands you haven't taught it, and buttons like Delete, Send or Pay unless you pressed them while teaching or
 added them in review. `--goal` runs from the command line ask you instead. It recognizes risky buttons by their names in
 English, so an unlabelled icon isn't caught. It treats on-screen
-text as data, never as instructions, and has a limit on actions and time per beat. It needs two displays for desktop
+text as data, never as instructions, and has a limit on actions and time per cue. It needs two displays for desktop
 control.
 
 ## Storage: Supabase or local
