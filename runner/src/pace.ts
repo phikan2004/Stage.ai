@@ -23,6 +23,3 @@ export const actionGapMs = (random = Math.random) => Math.round((450 + random() 
 
 /** Between one wheel notch and the next. */
 export const scrollStepMs = () => Math.round(45 * scale());
-
-/** Between beats, when no presenter is cueing them. */
-export const beatGapMs = () => Math.round(1200 * scale());

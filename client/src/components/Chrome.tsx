@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api } from "../lib/api";
-import { go } from "../lib/router";
 
 export interface Crumb {
   label: string;
   to?: string;
 }
 
-export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?: ReactNode }) {
+export type Tab = "projects" | "decks" | "demos";
+
+const TABS: [Tab, string, string][] = [
+  ["projects", "Projects", "#/projects"],
+  ["decks", "Decks", "#/"],
+  ["demos", "Demos", "#/demos"],
+];
+
+/** The brand and where you are, then the Projects, Decks and Demos tabs. */
+export function TopBar({ tab, crumbs = [], children }: { tab?: Tab; crumbs?: Crumb[]; children?: ReactNode }) {
   return (
     <header className="topbar">
       <a className="brand" href="#/">
@@ -23,6 +30,13 @@ export function TopBar({ crumbs = [], children }: { crumbs?: Crumb[]; children?:
         </nav>
       )}
       <div className="spacer" />
+      <nav className="tabs" aria-label="Products">
+        {TABS.map(([t, label, href]) => (
+          <a key={t} href={href} aria-current={tab === t ? "page" : undefined}>
+            {label}
+          </a>
+        ))}
+      </nav>
       {children}
     </header>
   );
@@ -90,46 +104,6 @@ export function NameDialog({
         </div>
       </form>
     </div>
-  );
-}
-
-export function NewMatterButton({ className, children }: { className?: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const [multiple, setMultiple] = useState(false);
-  return (
-    <>
-      <button className={className} onClick={() => setOpen(true)}>
-        {children}
-      </button>
-      {open && (
-        <NameDialog
-          title="New matter"
-          label="Name"
-          submitLabel="Create matter"
-          onClose={() => setOpen(false)}
-          onSubmit={async (name) => {
-            const m = await api.createMatter(name, multiple ? "multiple" : "single");
-            go(`/m/${m.id}`);
-          }}
-        >
-          <div className="deck-mode">
-            <span className="micro">Presentations</span>
-            <div className="deck-mode-row">
-              <span className={multiple ? "" : "on"}>One</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={multiple}
-                aria-label="More than one presentation"
-                className={`switch ${multiple ? "on" : ""}`}
-                onClick={() => setMultiple(!multiple)}
-              />
-              <span className={multiple ? "on" : ""}>More than one</span>
-            </div>
-          </div>
-        </NameDialog>
-      )}
-    </>
   );
 }
 

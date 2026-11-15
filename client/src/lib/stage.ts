@@ -22,6 +22,12 @@ function stageToken(): string | null {
 
 export const frameUrl = (recordingId: string, file: string) => `http://${RUNNER}/frames/${recordingId}/${file}?token=${stageToken()}`;
 
+/** A demo's cover: the frame chosen for it, else the last key moment it learned. Served by the runner on this Mac, so null when it isn't paired here. */
+export function coverUrl(show: { recordingId: string | null; cover: string | null; beats: { landmarks: string[] }[] }): string | null {
+  const frame = show.cover ?? show.beats.flatMap((b) => b.landmarks).at(-1);
+  return show.recordingId && frame && stageToken() ? frameUrl(show.recordingId, frame) : null;
+}
+
 export type Busy = "recording" | "learning" | "dry-run" | null;
 
 export interface StageState {

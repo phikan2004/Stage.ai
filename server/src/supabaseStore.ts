@@ -93,6 +93,7 @@ interface MatterRow {
   id: string;
   name: string;
   deck_mode: DeckMode;
+  solo: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -150,7 +151,7 @@ interface EventRow {
   simulated: boolean;
 }
 
-const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, deckMode: r.deck_mode, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
+const toMatter = (r: MatterRow): Matter => ({ id: r.id, name: r.name, deckMode: r.deck_mode, solo: r.solo, createdAt: ms(r.created_at)!, updatedAt: ms(r.updated_at)! });
 
 function toDeckBase(r: DeckRow): Omit<DeckRecord, "slides"> {
   return {
@@ -265,10 +266,19 @@ interface ShowRow {
   beats: Show["beats"];
   limits: Show["limits"];
   recording_id: string | null;
+  cover: string | null;
   dry_runs: Show["dryRuns"];
   created_at: Date;
   updated_at: Date;
 }
+
+type DeckSummaryRow = DeckRow & { region_count: number; run_count: number; last_run_at: Date | null };
+const toDeckSummary = (d: DeckSummaryRow): DeckSummary => ({
+  ...toDeckBase(d),
+  regionCount: d.region_count,
+  runCount: d.run_count,
+  lastRunAt: ms(d.last_run_at),
+});
 
 const toShow = (r: ShowRow): Show => ({
   id: r.id,
@@ -277,6 +287,7 @@ const toShow = (r: ShowRow): Show => ({
   beats: r.beats,
   limits: r.limits,
   recordingId: r.recording_id,
+  cover: r.cover,
   dryRuns: r.dry_runs,
   createdAt: r.created_at.getTime(),
   updatedAt: r.updated_at.getTime(),
@@ -331,9 +342,10 @@ export class SupabaseStore implements Library {
   /* ---------- reads ---------- */
 
   async home(): Promise<HomeData> {
-    const [matters, runs] = await Promise.all([
+    const [matters, decks, runs] = await Promise.all([
       this.sql<(MatterRow & { deck_count: number; run_count: number; last_run_at: Date | null; thumb_deck_id: string | null })[]>`
         select * from producer.matter_summaries order by updated_at desc`,
+      this.sql<DeckSummaryRow[]>`select * from producer.deck_summaries order by updated_at desc`,
       this.sql<RunRow[]>`select * from producer.run_summaries order by started_at desc limit ${RECENT_RUNS}`,
     ]);
     return {
@@ -344,6 +356,7 @@ export class SupabaseStore implements Library {
         lastRunAt: ms(m.last_run_at),
         thumbDeckId: m.thumb_deck_id,
       })),
+      decks: decks.map(toDeckSummary),
       runs: runs.map(toRunSummary),
     };
   }
@@ -352,23 +365,20 @@ export class SupabaseStore implements Library {
     if (!isId(id)) return null;
     const [[m], decks, runs] = await Promise.all([
       this.sql<MatterRow[]>`select * from producer.matters where id = ${id}`,
-      this.sql<(DeckRow & { region_count: number; run_count: number; last_run_at: Date | null })[]>`
-        select * from producer.deck_summaries where matter_id = ${id} order by updated_at desc`,
+      this.sql<DeckSummaryRow[]>`select * from producer.deck_summaries where matter_id = ${id} order by updated_at desc`,
       this.sql<RunRow[]>`select * from producer.run_summaries where matter_id = ${id} order by started_at desc limit 200`,
     ]);
     if (!m) return null;
     return {
       matter: toMatter(m),
-      decks: decks.map(
-        (d): DeckSummary => ({ ...toDeckBase(d), regionCount: d.region_count, runCount: d.run_count, lastRunAt: ms(d.last_run_at) }),
-      ),
+      decks: decks.map(toDeckSummary),
       runs: runs.map(toRunSummary),
     };
   }
 
   private async deckRecord(id: string, sql: postgres.Sql | postgres.TransactionSql = this.sql) {
-    const [d] = await sql<(DeckRow & { matter_name: string })[]>`
-      select d.*, m.name as matter_name from producer.decks d join producer.matters m on m.id = d.matter_id where d.id = ${id}`;
+    const [d] = await sql<(DeckRow & { matter_name: string; matter_solo: boolean })[]>`
+      select d.*, m.name as matter_name, m.solo as matter_solo from producer.decks d join producer.matters m on m.id = d.matter_id where d.id = ${id}`;
     if (!d) return null;
     const regions = await sql<RegionRow[]>`
       select * from producer.regions where deck_id = ${id} order by slide_index, position`;
@@ -378,7 +388,7 @@ export class SupabaseStore implements Library {
   async deck(id: string): Promise<DeckDetail | null> {
     if (!isId(id)) return null;
     const d = await this.deckRecord(id);
-    return d && { ...d.record, matterName: d.row.matter_name };
+    return d && { ...d.record, matterName: d.row.matter_name, matterSolo: d.row.matter_solo };
   }
 
   async run(id: string): Promise<RunDetail | null> {
@@ -406,8 +416,9 @@ export class SupabaseStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
-    const [m] = await this.sql<MatterRow[]>`insert into producer.matters (name, deck_mode) values (${name}, ${deckMode}) returning *`;
+  async createMatter(name: string, deckMode: DeckMode, solo: boolean): Promise<Matter> {
+    const [m] = await this.sql<MatterRow[]>`
+      insert into producer.matters (name, deck_mode, solo) values (${name}, ${deckMode}, ${solo}) returning *`;
     return toMatter(m);
   }
 
@@ -584,6 +595,10 @@ export class SupabaseStore implements Library {
     return rows.map(toShow);
   }
 
+  async allShows(): Promise<Show[]> {
+    return (await this.sql<ShowRow[]>`select * from producer.shows order by updated_at desc`).map(toShow);
+  }
+
   async show(id: string): Promise<Show | null> {
     if (!isId(id)) return null;
     const [r] = await this.sql<ShowRow[]>`select * from producer.shows where id = ${id}`;
@@ -607,6 +622,7 @@ export class SupabaseStore implements Library {
         beats = coalesce(${json(patch.beats)}::jsonb, beats),
         limits = coalesce(${json(patch.limits)}::jsonb, limits),
         recording_id = coalesce(${patch.recordingId ?? null}, recording_id),
+        cover = coalesce(${patch.cover ?? null}, cover),
         dry_runs = coalesce(${json(patch.dryRuns)}::jsonb, dry_runs)
       where id = ${id} returning *`;
     return r ? toShow(r) : null;

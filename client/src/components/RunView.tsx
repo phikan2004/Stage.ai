@@ -64,14 +64,13 @@ export default function RunView({ id }: { id: string }) {
 
   const deckLabel = run ? deckTitle(run.deckName) : "…";
   const crumbs = [
-    { label: "Matters", to: "/" },
     { label: run?.matterName || "…", to: run ? `/m/${run.matterId}` : undefined },
     { label: run ? `Run · ${dateTime(run.startedAt)}` : "Run" },
   ];
 
   return (
     <>
-      <TopBar crumbs={crumbs} />
+      <TopBar tab="decks" crumbs={crumbs} />
       <main className="page">
         {error && <div className="banner err">{error}</div>}
         {!run && !error && <Loading />}

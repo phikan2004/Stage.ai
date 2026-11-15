@@ -51,7 +51,7 @@ async function requireDesktop(helper: Helper): Promise<Display> {
 
 function limitsFromArgs(): Limits {
   const apps = args.allow!.split(",").map((a) => a.trim()).filter(Boolean);
-  return { apps, origins: args.url ? [new URL(args.url).origin] : [], taughtCommands: [] };
+  return { apps, origins: args.url ? [new URL(args.url).origin] : [], taughtCommands: [], taughtActions: [] };
 }
 
 async function openDriver(helper: Helper, limits: Limits): Promise<Driver> {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sameFingerprint } from "./driver.ts";
-import { appAllowed, commandTaught, connectionAllowed, insideBounds, keyBlocked, normalizeCombo, originAllowed, riskyName, toScreen, type Limits } from "./safety.ts";
+import { elementPrint, sameFingerprint } from "./driver.ts";
+import { actionTaught, appAllowed, commandTaught, consoleOnStage, openTarget, connectionAllowed, insideBounds, keyBlocked, normalizeCombo, originAllowed, riskyName, toScreen, type Limits } from "./safety.ts";
 
-const limits: Limits = { apps: ["TextEdit", "com.apple.Terminal"], origins: ["http://localhost:5173"], taughtCommands: ["npm test"] };
+const limits: Limits = { apps: ["TextEdit", "com.apple.Terminal"], origins: ["http://localhost:5173"], taughtCommands: ["npm test"], taughtActions: ["Send invoice"] };
 const stage = { x: 1920, y: 0, width: 1920, height: 1080 };
 
 describe("allowlist", () => {
@@ -25,9 +25,30 @@ describe("allowlist", () => {
     expect(originAllowed(limits, "not a url")).toBe(false);
   });
 
+  it("treats www and the bare address as one site", () => {
+    const apple: Limits = { ...limits, origins: ["https://www.apple.com"] };
+    expect(originAllowed(apple, "https://apple.com/macbook-pro/")).toBe(true);
+    expect(originAllowed({ ...limits, origins: ["https://apple.com"] }, "https://www.apple.com/")).toBe(true);
+    expect(originAllowed(apple, "https://store.apple.com/")).toBe(false);
+    expect(originAllowed(apple, "http://www.apple.com/")).toBe(false);
+  });
+
+  it("reads a bare address as a website and a name as an app", () => {
+    expect(openTarget("apple.com")).toBe("https://apple.com");
+    expect(openTarget("platform.claude.com/dashboard")).toBe("https://platform.claude.com/dashboard");
+    expect(openTarget("https://apple.com")).toBe("https://apple.com");
+    expect(openTarget("Google Chrome")).toBe("Google Chrome");
+    expect(openTarget("Visual Studio Code.app")).toBe("Visual Studio Code.app");
+  });
+
   it("knows taught commands", () => {
     expect(commandTaught(limits, " npm test\n")).toBe(true);
     expect(commandTaught(limits, "rm -rf ~")).toBe(false);
+  });
+
+  it("knows taught actions, whatever the case", () => {
+    expect(actionTaught(limits, " send invoice")).toBe(true);
+    expect(actionTaught(limits, "Delete account")).toBe(false);
   });
 });
 
@@ -71,6 +92,20 @@ describe("display fence", () => {
   });
 });
 
+describe("console placement", () => {
+  const onStage = { x: 2000, y: 100, width: 800, height: 600 };
+
+  it("spots the Stage page on the stage display", () => {
+    expect(consoleOnStage({ title: "Stage - Google Chrome", frame: onStage }, stage)).toBe(true);
+  });
+
+  it("is fine with it on another display, or with any other window", () => {
+    expect(consoleOnStage({ title: "Stage - Google Chrome", frame: { ...onStage, x: 100 } }, stage)).toBe(false);
+    expect(consoleOnStage({ title: "Acme dashboard", frame: onStage }, stage)).toBe(false);
+    expect(consoleOnStage({ title: "Stage" }, stage)).toBe(false);
+  });
+});
+
 describe("local connection", () => {
   const expected = { origins: ["http://localhost:5173"], token: "t" };
 
@@ -88,5 +123,32 @@ describe("fingerprints", () => {
     expect(sameFingerprint({ key: "a", grid }, { key: "a", grid: grid.map((v) => v + 2) })).toBe(true);
     expect(sameFingerprint({ key: "a", grid }, { key: "a", grid: grid.map((v) => v + 40) })).toBe(false);
     expect(sameFingerprint({ key: "a" }, { key: "b" })).toBe(false);
+  });
+
+  const screen = Array.from({ length: 30 }, (_, i) => elementPrint({ role: "button", name: `Item ${i}`, x: 0, y: i * 40 }));
+
+  it("ignores a hint that flickers", () => {
+    const flicker = screen.with(29, elementPrint({ role: "textbox", name: "Type / for commands", x: 0, y: 1160 }));
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "a", elements: flicker })).toBe(true);
+  });
+
+  it("notices when the held action's own target changes, however small the change", () => {
+    const flicker = screen.with(3, elementPrint({ role: "button", name: "Other", x: 0, y: 120 }));
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "a", elements: flicker }, [screen[3]])).toBe(false);
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "a", elements: flicker }, [screen[4]])).toBe(true);
+  });
+
+  it("notices when its target moves", () => {
+    const moved = screen.with(3, elementPrint({ role: "button", name: "Item 3", x: 0, y: 200 }));
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "a", elements: moved }, [screen[3]])).toBe(false);
+  });
+
+  it("treats a scroll or a new page as a new screen", () => {
+    const scrolled = screen.map((_, i) => elementPrint({ role: "button", name: `Item ${i}`, x: 0, y: i * 40 + 200 }));
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "a", elements: scrolled })).toBe(false);
+  });
+
+  it("notices a different window", () => {
+    expect(sameFingerprint({ key: "a", elements: screen }, { key: "b", elements: screen })).toBe(false);
   });
 });

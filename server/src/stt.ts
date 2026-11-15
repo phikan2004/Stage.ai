@@ -27,6 +27,8 @@ export function deepgramUrl(keyterms: string[]): string {
     smart_format: "true",
     // Finalize a phrase after 300 ms of silence instead of waiting longer.
     endpointing: "300",
+    // Deepgram keeps audio for model training unless told not to.
+    mip_opt_out: "true",
   });
   for (const term of keyterms.slice(0, MAX_KEYTERMS)) {
     if (term.trim()) params.append("keyterm", term.trim().slice(0, 60));

@@ -129,13 +129,13 @@ export async function pickFiles(files: FileList | File[]): Promise<{ deck?: File
   return { deck, regions };
 }
 
-/** Create a "Sample" matter holding the bundled sample deck. */
+/** Add the bundled sample deck, on its own. */
 export async function createSampleMatter(onProgress: (msg: string) => void): Promise<string> {
   onProgress("Loading sample deck…");
   const [pdf, regions] = await Promise.all([
     fetch("/sample/sample.pdf").then((r) => r.arrayBuffer()),
     fetch("/sample/sample.regions.json").then((r) => r.text()),
   ]);
-  const matter = await api.createMatter("Sample matter");
+  const matter = await api.createMatter("sample", true);
   return addDeck(matter.id, "sample.pdf", pdf, regions, onProgress);
 }

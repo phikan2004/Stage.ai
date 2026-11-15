@@ -5,7 +5,7 @@ import { MatterFullError, UploadMissingError, type Library } from "./store.ts";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const NameBody = z.object({ name: MatterSchema.shape.name });
-const NewMatterBody = NameBody.extend({ deckMode: DeckModeSchema.default("multiple") });
+const NewMatterBody = NameBody.extend({ deckMode: DeckModeSchema.default("multiple"), solo: z.boolean().default(false) });
 
 const notFound = (res: Response, what: string) => res.status(404).json({ error: `${what} not found` });
 const badRequest = (res: Response, error: z.ZodError) =>
@@ -24,7 +24,7 @@ export function libraryRouter(store: Library) {
   r.post("/matters", async (req, res) => {
     const body = NewMatterBody.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    res.status(201).json(await store.createMatter(body.data.name, body.data.deckMode));
+    res.status(201).json(await store.createMatter(body.data.name, body.data.deckMode, body.data.solo));
   });
 
   r.get("/matters/:id", async (req, res) => {
@@ -147,6 +147,10 @@ export function libraryRouter(store: Library) {
   });
 
   /* ---------- shows ---------- */
+
+  r.get("/shows", async (_req, res) => {
+    res.json(await store.allShows());
+  });
 
   r.get("/matters/:id/shows", async (req, res) => {
     const shows = await store.shows(req.params.id);
