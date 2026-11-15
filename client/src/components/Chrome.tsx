@@ -254,6 +254,61 @@ export function Select<V extends string>({
   );
 }
 
+/** A styled stand-in for confirm(): asks once, shows any error, and closes on Escape or Cancel. */
+export function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  children?: ReactNode;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dialog" role="alertdialog" aria-modal="true" aria-label={title}>
+        <h3 className="display">{title}</h3>
+        {children && <p className="dialog-text">{children}</p>}
+        {error && <div className="banner err">{error}</div>}
+        <div className="dialog-actions">
+          {/* Cancel takes focus, so Return never deletes by accident. */}
+          <button type="button" className="btn ghost" onClick={onClose} autoFocus>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn danger-fill"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+                setBusy(false);
+              }
+            }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Loading({ text = "Loading…" }: { text?: string }) {
   return <div className="page-status micro">{text}</div>;
 }

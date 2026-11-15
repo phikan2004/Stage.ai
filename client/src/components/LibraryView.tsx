@@ -6,7 +6,7 @@ import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
 import { deckTitle, plural } from "../lib/format";
 import { go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
-import { Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
+import { ConfirmDialog, Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
 
 const INTRO: Record<Tab, { title: ReactNode; line: string }> = {
   projects: {
@@ -132,13 +132,7 @@ function Overview({
   const matches = (e: Entry) => !q || hit(e.name) || (e.kind === "project" ? inside(e.project.id) : !!e.projectName && hit(e.projectName));
   const shown = sortEntries(entries.filter(matches), sort);
 
-  const deleteDeck = async (d: DeckSummary, inProject: boolean) => {
-    const runs = d.runCount ? ` and its ${plural(d.runCount, "run")}` : "";
-    if (!confirm(`Delete “${deckTitle(d.name)}”${runs}? This can't be undone.`)) return;
-    // A deck on its own lives in a hidden matter, which goes with it.
-    await (inProject ? api.deleteDeck(d.id) : api.deleteMatter(d.matterId));
-    reload();
-  };
+  const actions = useItemActions(reload);
 
   const intro = INTRO[tab];
   const what = tab === "projects" ? "projects" : tab === "decks" ? "decks" : "demos";
@@ -169,11 +163,16 @@ function Overview({
         <div className="cards library">
           {shown.map((e) =>
             e.kind === "project" ? (
-              <ProjectCard key={e.project.id} project={e.project} demos={(shows ?? []).filter((s) => s.matterId === e.project.id)} />
+              <ProjectCard
+                key={e.project.id}
+                project={e.project}
+                demos={(shows ?? []).filter((s) => s.matterId === e.project.id)}
+                menu={actions.menu({ kind: "project", project: e.project, demoCount: shows ? shows.filter((s) => s.matterId === e.project.id).length : null })}
+              />
             ) : e.kind === "deck" ? (
-              <DeckCard key={e.deck.id} deck={e.deck} projectName={e.projectName} onDelete={() => deleteDeck(e.deck, !!e.projectName)} />
+              <DeckCard key={e.deck.id} deck={e.deck} projectName={e.projectName} menu={actions.menu({ kind: "deck", deck: e.deck, solo: !e.projectName })} />
             ) : (
-              <DemoCard key={e.show.id} show={e.show} projectName={e.projectName} />
+              <DemoCard key={e.show.id} show={e.show} projectName={e.projectName} menu={actions.menu({ kind: "demo", show: e.show, solo: !e.projectName })} />
             ),
           )}
         </div>
@@ -186,6 +185,7 @@ function Overview({
       )}
 
       {tab === "decks" && data.matters.length === 0 && <SampleLine onError={onError} />}
+      {actions.dialogs}
     </>
   );
 }
@@ -203,12 +203,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
     go(tabPath("projects"));
   };
 
-  const deleteDeck = async (d: DeckSummary) => {
-    const runs = d.runCount ? ` and its ${plural(d.runCount, "run")}` : "";
-    if (!confirm(`Delete “${deckTitle(d.name)}”${runs}? This can't be undone.`)) return;
-    await api.deleteDeck(d.id);
-    reload();
-  };
+  const actions = useItemActions(reload);
 
   const toggle = (id: string) => setOpen(open === id ? null : id);
   return (
@@ -243,7 +238,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
                 title={deckTitle(d.name)}
                 detail={`${plural(d.slideCount, "slide")} · ${plural(d.regionCount, "region")}${d.analyzed ? "" : " · needs analysis"}`}
                 href={`#/d/${d.id}`}
-                onDelete={() => deleteDeck(d)}
+                menu={actions.menu({ kind: "deck", deck: d, solo: false })}
               >
                 {d.hasThumb && <img className="row-preview" src={api.thumbUrl(d.id)} alt="" />}
               </Row>
@@ -273,6 +268,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
                 title={s.name}
                 detail={`${s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}${s.dryRuns.length ? ` · ${plural(s.dryRuns.length, "dry run")}` : ""}`}
                 href={`#/s/${s.id}`}
+                menu={actions.menu({ kind: "demo", show: s, solo: false })}
               >
                 {s.beats.length > 0 && (
                   <ol className="row-beats">
@@ -305,6 +301,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
           }}
         />
       )}
+      {actions.dialogs}
     </>
   );
 }
@@ -332,7 +329,7 @@ function Row({
   title,
   detail,
   href,
-  onDelete,
+  menu,
   children,
 }: {
   open: boolean;
@@ -341,21 +338,24 @@ function Row({
   title: string;
   detail: string;
   href: string;
-  onDelete?: () => void;
+  menu?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <div className={`row ${open ? "open" : ""}`}>
-      <button className="row-head" aria-expanded={open} onClick={onToggle}>
-        <span className="row-thumb">{thumb}</span>
-        <span className="row-text">
-          <span className="card-title">{title}</span>
-          <span className="hint">{detail}</span>
-        </span>
-        <span className="row-chevron" aria-hidden="true">
-          ›
-        </span>
-      </button>
+      <div className="row-line">
+        <button className="row-head" aria-expanded={open} onClick={onToggle}>
+          <span className="row-thumb">{thumb}</span>
+          <span className="row-text">
+            <span className="card-title">{title}</span>
+            <span className="hint">{detail}</span>
+          </span>
+          <span className="row-chevron" aria-hidden="true">
+            ›
+          </span>
+        </button>
+        {menu}
+      </div>
       {open && (
         <div className="row-body">
           {children}
@@ -363,11 +363,6 @@ function Row({
             <a className="btn small primary" href={href}>
               Open
             </a>
-            {onDelete && (
-              <button className="btn small ghost danger" onClick={onDelete}>
-                Delete
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -375,51 +370,45 @@ function Row({
   );
 }
 
-function ProjectCard({ project: p, demos }: { project: MatterSummary; demos: Show[] }) {
+function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demos: Show[]; menu: ReactNode }) {
   // Its newest deck's first slide, else its newest demo's screenshot.
   const cover = p.thumbDeckId ? undefined : demos.find((s) => coverUrl(s));
   return (
-    <a className="card project-card" href={`#${projectPath(p.id)}`}>
-      <div className="card-img">
-        {p.thumbDeckId && <img src={api.thumbUrl(p.thumbDeckId, p.updatedAt)} alt="" />}
-        {cover && <Cover show={cover} />}
-        <span className="badge quiet">Project</span>
-      </div>
-      <div className="card-body">
-        <div className="card-title">{p.name}</div>
-        <div className="hint">
-          {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")}
+    <CardShell menu={menu}>
+      <a className="card project-card" href={`#${projectPath(p.id)}`}>
+        <div className="card-img">
+          {p.thumbDeckId && <img src={api.thumbUrl(p.thumbDeckId, p.updatedAt)} alt="" />}
+          {cover && <Cover show={cover} />}
+          <span className="badge quiet">Project</span>
         </div>
-      </div>
-    </a>
+        <div className="card-body">
+          <div className="card-title">{p.name}</div>
+          <div className="hint">
+            {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")}
+          </div>
+        </div>
+      </a>
+    </CardShell>
   );
 }
 
-function DeckCard({ deck: d, projectName, onDelete }: { deck: DeckSummary; projectName: string | null; onDelete: () => void }) {
+function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectName: string | null; menu: ReactNode }) {
   return (
-    <a className="card" href={`#/d/${d.id}`}>
-      <div className="card-img">
-        {d.hasThumb && <img src={api.thumbUrl(d.id)} alt="" />}
-        {!d.analyzed && <span className="badge">Needs analysis</span>}
-        <button
-          className="card-x"
-          title="Delete deck"
-          onClick={(e) => {
-            e.preventDefault();
-            onDelete();
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div className="card-body">
-        <div className="card-title">{deckTitle(d.name)}</div>
-        <div className="hint">
-          {projectName && `${projectName} · `}
-          {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")}
+    <CardShell menu={menu}>
+      <a className="card" href={`#/d/${d.id}`}>
+        <div className="card-img">
+          {d.hasThumb && <img src={api.thumbUrl(d.id)} alt="" />}
+          {!d.analyzed && <span className="badge">Needs analysis</span>}
         </div>
-      </div>
-    </a>
+        <div className="card-body">
+          <div className="card-title">{deckTitle(d.name)}</div>
+          <div className="hint">
+            {projectName && `${projectName} · `}
+            {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")}
+          </div>
+        </div>
+      </a>
+    </CardShell>
   );
 }
 
@@ -443,27 +432,140 @@ function BeatDots({ show: s }: { show: Show }) {
   );
 }
 
-function DemoCard({ show: s, projectName }: { show: Show; projectName: string | null }) {
+function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: string | null; menu: ReactNode }) {
   return (
-    <a className="card" href={`#/s/${s.id}`}>
-      <div className="card-img">
-        <Cover show={s} />
-        <BeatDots show={s} />
-      </div>
-      <div className="card-body">
-        <div className="card-title">{s.name}</div>
-        <div className="hint">
-          {projectName && `${projectName} · `}
-          {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
-          {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`}
+    <CardShell menu={menu}>
+      <a className="card" href={`#/s/${s.id}`}>
+        <div className="card-img">
+          <Cover show={s} />
+          <BeatDots show={s} />
         </div>
-      </div>
-    </a>
+        <div className="card-body">
+          <div className="card-title">{s.name}</div>
+          <div className="hint">
+            {projectName && `${projectName} · `}
+            {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
+            {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`}
+          </div>
+        </div>
+      </a>
+    </CardShell>
   );
 }
 
+/** Keeps a card's ⋯ menu beside its link rather than inside it, so using the menu never opens the card. */
+function CardShell({ menu, children }: { menu: ReactNode; children: ReactNode }) {
+  return (
+    <div className="card-shell">
+      {children}
+      {menu}
+    </div>
+  );
+}
+
+/** Something in the library that can be renamed or deleted without opening it. */
+type Item =
+  | { kind: "project"; project: MatterSummary; demoCount: number | null }
+  | { kind: "deck"; deck: DeckSummary; solo: boolean }
+  | { kind: "demo"; show: Show; solo: boolean };
+
+const KIND_NAME: Record<Item["kind"], string> = { project: "project", deck: "deck", demo: "demo" };
+const itemName = (i: Item) => (i.kind === "project" ? i.project.name : i.kind === "deck" ? deckTitle(i.deck.name) : i.show.name);
+
+async function renameItem(i: Item, name: string) {
+  if (i.kind === "project") await api.renameMatter(i.project.id, name);
+  // Keep the file's extension, which the library hides.
+  else if (i.kind === "deck") await api.patchDeck(i.deck.id, { name: name + (i.deck.name.match(/\.(pdf|pptx)$/i)?.[0] ?? "") });
+  else await api.patchShow(i.show.id, { name });
+}
+
+// Something not in a project lives in a hidden matter of its own, which goes with it.
+async function deleteItem(i: Item) {
+  if (i.kind === "project") await api.deleteMatter(i.project.id);
+  else if (i.kind === "deck") await (i.solo ? api.deleteMatter(i.deck.matterId) : api.deleteDeck(i.deck.id));
+  else await (i.solo ? api.deleteMatter(i.show.matterId) : api.deleteShow(i.show.id));
+}
+
+function deleteNote(i: Item): string {
+  if (i.kind === "project") {
+    const inside = [
+      i.project.deckCount && plural(i.project.deckCount, "deck"),
+      i.demoCount && plural(i.demoCount, "demo"),
+    ].filter(Boolean);
+    return `${inside.length ? `Its ${inside.join(" and ")} go with it. ` : ""}This can't be undone.`;
+  }
+  if (i.kind === "deck") return `${i.deck.runCount ? `Its ${plural(i.deck.runCount, "run")} go with it. ` : ""}This can't be undone.`;
+  return "This can't be undone. Its recording stays on this Mac.";
+}
+
+/** A ⋯ menu for any item, with the rename and delete dialogs it opens. */
+function useItemActions(reload: () => void) {
+  const [renaming, setRenaming] = useState<Item | null>(null);
+  const [deleting, setDeleting] = useState<Item | null>(null);
+  const menu = (item: Item) => (
+    <Menu boxClassName="card-more-box" className="card-more" label="⋯" title={`Rename or delete “${itemName(item)}”`}>
+      {(close) => (
+        <>
+          <button role="menuitem" onClick={() => (close(), setRenaming(item))}>
+            Rename
+          </button>
+          <button role="menuitem" className="danger" onClick={() => (close(), setDeleting(item))}>
+            Delete
+          </button>
+        </>
+      )}
+    </Menu>
+  );
+  const dialogs = (
+    <>
+      {renaming && (
+        <NameDialog
+          title={`Rename ${KIND_NAME[renaming.kind]}`}
+          label="Name"
+          initial={itemName(renaming)}
+          submitLabel="Save"
+          onClose={() => setRenaming(null)}
+          onSubmit={async (name) => {
+            await renameItem(renaming, name);
+            setRenaming(null);
+            reload();
+          }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete “${itemName(deleting)}”?`}
+          confirmLabel={`Delete ${KIND_NAME[deleting.kind]}`}
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await deleteItem(deleting);
+            setDeleting(null);
+            reload();
+          }}
+        >
+          {deleteNote(deleting)}
+        </ConfirmDialog>
+      )}
+    </>
+  );
+  return { menu, dialogs };
+}
+
 /** A small menu under a button; closes on a pick, a click elsewhere or Escape. */
-function Menu({ label, className, children }: { label: ReactNode; className: string; children: (close: () => void) => ReactNode }) {
+function Menu({
+  label,
+  className,
+  boxClassName,
+  title,
+  children,
+}: {
+  label: ReactNode;
+  className: string;
+  boxClassName?: string;
+  /** Names a button whose label is only a symbol. */
+  title?: string;
+  children: (close: () => void) => ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -478,8 +580,8 @@ function Menu({ label, className, children }: { label: ReactNode; className: str
     };
   }, [open]);
   return (
-    <div className="menu-box" ref={box}>
-      <button className={className} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <div className={`menu-box ${boxClassName ?? ""}`} ref={box}>
+      <button className={className} title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         {label}
       </button>
       {open && (

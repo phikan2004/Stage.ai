@@ -30,6 +30,3 @@ export function useConfig() {
   return [config, update] as const;
 }
 
-/** Muted per-region hues, cycled by index. */
-export const HUES = ["#5b7fa6", "#c26a4a", "#6f8f5a", "#8a6aa6", "#b08a3e", "#4f8d8a", "#a65b78", "#7a7f88"];
-export const hue = (i: number) => HUES[i % HUES.length];

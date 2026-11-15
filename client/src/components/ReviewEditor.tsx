@@ -6,7 +6,6 @@ import { CUES } from "../lib/cues";
 import { placePopup } from "../lib/popupPosition";
 import { highlightMarks } from "../lib/textLines";
 import { useSuggestCues } from "../lib/useSuggestCues";
-import { hue } from "../lib/useConfig";
 
 interface Props {
   deckId: string;
@@ -293,7 +292,6 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
                   top: pct(r.box.y),
                   width: pct(r.box.w),
                   height: pct(r.box.h),
-                  ["--hue" as string]: hue(i),
                   pointerEvents: drawMode ? "none" : undefined,
                 }}
               >
