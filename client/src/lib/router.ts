@@ -19,3 +19,10 @@ export function useRoute(): string[] {
 export const go = (path: string) => {
   location.hash = path;
 };
+
+// Whether this tab has moved between pages here, so going back stays inside the app.
+let moved = false;
+window.addEventListener("hashchange", () => (moved = true));
+
+/** Back to the previous page, or to `fallback` when this page was opened directly. */
+export const back = (fallback: string) => (moved ? history.back() : go(fallback));
