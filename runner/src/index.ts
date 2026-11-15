@@ -12,7 +12,7 @@ import type { Driver } from "./driver.ts";
 import { Helper, stageDisplay, type Display } from "./helper.ts";
 import { claudeModel, estimateCost, modelName } from "./model.ts";
 import type { Limits } from "./safety.ts";
-import { startConsoleServer } from "./server.ts";
+import { startConsoleServer, type ConsoleServer } from "./server.ts";
 import { StageSession } from "./session.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -34,14 +34,24 @@ const { values: args } = parseArgs({
 });
 
 const DATA_DIR = process.env.DATA_DIR || join(root, "data");
-const CONSOLE_ORIGINS = ["http://localhost:5180"];
+/**
+ * The Stage consoles allowed to drive the runner: the always-on local app (5180, demos in local files) and the
+ * regular dev app (5173, demos in Supabase). Recordings stay on this Mac either way.
+ */
+const CONSOLE_ORIGINS = ["http://localhost:5180", "http://localhost:5173"];
 const PORT = Number(process.env.STAGE_PORT) || 8788;
+/** Started by the login item (npm run stage:install), whose label launchd passes on. */
+const AT_LOGIN = process.env.XPC_SERVICE_NAME === "com.stage.dev";
 
 async function requireDesktop(helper: Helper): Promise<Display> {
   const status = await helper.call<{ accessibility: boolean; screen: boolean }>("status");
   const missing = [!status.accessibility && "Accessibility", !status.screen && "Screen Recording"].filter(Boolean);
   if (missing.length) {
-    throw new Error(`Stage needs ${missing.join(" and ")} permission. Run \`npm run stage -- --setup\`, then allow it in System Settings → Privacy & Security for the app you run this from, and restart that app.`);
+    throw new Error(
+      AT_LOGIN
+        ? `Stage needs ${missing.join(" and ")} permission. In System Settings → Privacy & Security, turn it on for “node” under ${missing.join(" and ")}. Stage notices within a few seconds.`
+        : `Stage needs ${missing.join(" and ")} permission. Allow it in System Settings → Privacy & Security for the app Stage was started from, then restart that app.`,
+    );
   }
   const displays = await helper.displays();
   const display = stageDisplay(displays);
@@ -164,26 +174,66 @@ async function pairingToken(): Promise<string> {
   return token;
 }
 
+const READY_RETRY_MS = 5000;
+
+/**
+ * Serves the console right away, then waits until the Mac is ready (permissions and a second display),
+ * telling the console what's missing meanwhile. Starts with the app, so nobody has to run it by hand.
+ */
 async function serve(helper: Helper) {
-  const display = await requireDesktop(helper);
   const token = await pairingToken();
   let session: StageSession | null = null;
-  const server = await startConsoleServer({
-    port: PORT,
-    origins: CONSOLE_ORIGINS,
-    token,
-    onMessage: (m) => session?.handle(m),
-    onConnect: () => session?.status(),
-    frame: (path) => session?.frame(path) ?? Promise.resolve(null),
-  });
-  session = new StageSession(helper, display, join(DATA_DIR, "recordings"), server.broadcast);
-  await helper.onHotkey((name) => session?.hotkey(name));
-  console.log(`Stage runner ready, audience display: ${display.name}.\nFirst time? Pair the console: ${CONSOLE_ORIGINS[0]}/#/pair/${token}`);
+  let problem: string | null = "Getting the stage display ready…";
+  let server: ConsoleServer;
+  const waiting = () => server.broadcast({ type: "status", busy: null, display: null, problem });
+  try {
+    server = await startConsoleServer({
+      port: PORT,
+      origins: CONSOLE_ORIGINS,
+      token,
+      onMessage: (m) => session?.handle(m),
+      onConnect: () => (session ? session.status() : waiting()),
+      frame: (path) => session?.frame(path) ?? Promise.resolve(null),
+    });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+    console.log("A Stage runner is already running on this Mac; using that one.");
+    helper.stop();
+    process.exit(0);
+  }
   process.on("SIGINT", () => {
     server.close();
     helper.stop();
     process.exit(0);
   });
+  console.log("Stage runner started; the console pairs with it by itself.");
+
+  // Ask macOS for the permissions once, which shows its own prompts, instead of sending anyone to --setup.
+  let asked = false;
+  while (!session) {
+    try {
+      const display = await requireDesktop(helper);
+      session = new StageSession(helper, display, join(DATA_DIR, "recordings"), server.broadcast);
+      await helper.onHotkey((name) => session?.hotkey(name));
+      problem = null;
+      session.status();
+      console.log(`Stage runner ready, audience display: ${display.name}.`);
+    } catch (e) {
+      session = null;
+      if (!asked) {
+        asked = true;
+        await helper.call("request_permissions").catch(() => {});
+      }
+      const next = e instanceof Error ? e.message : String(e);
+      if (next !== problem) console.log(next);
+      problem = next;
+      waiting();
+      await new Promise((r) => setTimeout(r, READY_RETRY_MS));
+      // macOS reads permissions when a process starts, so a fresh helper is what notices a new grant.
+      helper.stop();
+      helper = await Helper.start();
+    }
+  }
 }
 
 /** Proves the safety controls on the real Mac: the display fence, the clicker, and the stop key. */

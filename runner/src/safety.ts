@@ -100,5 +100,13 @@ export const consoleOnStage = (front: { title?: string; frame?: Frame }, stage: 
 
 /** Only the Stage console may connect: a random website can't, because browsers always send its real Origin. */
 export function connectionAllowed(origin: string | undefined, token: string | null, expected: { origins: string[]; token: string }): boolean {
-  return !!origin && expected.origins.includes(origin) && token === expected.token;
+  return pairAllowed(origin, expected.origins) && token === expected.token;
+}
+
+/**
+ * The console pairs itself by asking for the token. Only the Stage console's own origin gets it:
+ * a website can't fake its Origin, and anything on this Mac that could fake one can already read the token file.
+ */
+export function pairAllowed(origin: string | undefined, origins: string[]): boolean {
+  return !!origin && origins.includes(origin);
 }

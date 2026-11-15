@@ -9,9 +9,7 @@
     },
     {
       "name": "producer-local",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "npm run stage:dev"],
-      "port": 5180
+      "url": "http://localhost:5180"
     }
   ]
 }

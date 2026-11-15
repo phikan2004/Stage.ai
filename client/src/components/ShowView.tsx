@@ -203,8 +203,8 @@ export default function ShowView({ id }: { id: string }) {
     );
   }
 
-  const { busy, connected, paired } = stage;
-  const ready = connected && !busy;
+  const { busy, connected, problem } = stage;
+  const ready = connected && !busy && !problem;
 
   return (
     <>
@@ -223,8 +223,13 @@ export default function ShowView({ id }: { id: string }) {
         </div>
 
         {error && <div className="banner err">{error}</div>}
-        {!paired && <div className="banner">Run <code>npm run stage</code> in Terminal and open the pairing link it prints.</div>}
-        {paired && !connected && <div className="banner">Waiting for the Stage runner. Run <code>npm run stage</code> in Terminal.</div>}
+        {!connected && (
+          <div className="banner">
+            Looking for Stage on this Mac… It starts by itself when you log in and connects here on its own. If it never
+            does, it isn't set up on this Mac yet: run <code>npm run stage:install</code> once.
+          </div>
+        )}
+        {connected && problem && <div className="banner">{problem}</div>}
 
         <section className="section first">
           <div className="section-head">
