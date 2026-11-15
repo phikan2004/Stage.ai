@@ -23,7 +23,7 @@ export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?:
       </a>
       {back && (
         <button className="back" onClick={() => goBack(back)}>
-          ← Back
+          <span aria-hidden="true">←</span> Back
         </button>
       )}
       {crumbs.length > 0 && (
