@@ -70,7 +70,7 @@ export default function RunView({ id }: { id: string }) {
 
   return (
     <>
-      <TopBar tab="decks" crumbs={crumbs} />
+      <TopBar tab="decks" back="/" crumbs={crumbs} />
       <main className="page">
         {error && <div className="banner err">{error}</div>}
         {!run && !error && <Loading />}

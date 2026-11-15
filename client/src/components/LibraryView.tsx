@@ -78,7 +78,7 @@ export default function LibraryView({ tab, projectId }: { tab: Tab; projectId?: 
 
   return (
     <>
-      <TopBar tab={tab}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
+      <TopBar tab={tab} back={projectId ? "/projects" : undefined}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
       <main className="page">
         {error && <div className="banner err">{error}</div>}
         {!data && !error && <Loading />}
@@ -264,7 +264,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
                 onToggle={() => toggle(s.id)}
                 thumb={<Cover show={s} />}
                 title={s.name}
-                detail={`${s.beats.length ? plural(s.beats.length, "beat") : "Not taught yet"}${s.dryRuns.length ? ` · ${plural(s.dryRuns.length, "dry run")}` : ""}`}
+                detail={`${s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}${s.dryRuns.length ? ` · ${plural(s.dryRuns.length, "dry run")}` : ""}`}
                 href={`#/s/${s.id}`}
               >
                 {s.beats.length > 0 && (
@@ -406,7 +406,7 @@ function Cover({ show }: { show: Show }) {
   return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : null;
 }
 
-/** One dot per beat: green if the last dry run got through it, orange if not, hollow if never tried. */
+/** One dot per cue: green if the last dry run got through it, orange if not, hollow if never tried. */
 function BeatDots({ show: s }: { show: Show }) {
   const last = s.dryRuns.at(-1);
   return (
@@ -430,7 +430,7 @@ function DemoCard({ show: s, projectName }: { show: Show; projectName: string | 
         <div className="card-title">{s.name}</div>
         <div className="hint">
           {projectName && `${projectName} · `}
-          {s.beats.length ? plural(s.beats.length, "beat") : "Not taught yet"}
+          {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
           {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`}
         </div>
       </div>

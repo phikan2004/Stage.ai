@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { back as goBack } from "../lib/router";
 
 export interface Crumb {
   label: string;
@@ -14,12 +15,17 @@ const TABS: [Tab, string, string][] = [
 ];
 
 /** The brand and where you are, then the Projects, Decks and Demos tabs. */
-export function TopBar({ tab, crumbs = [], children }: { tab?: Tab; crumbs?: Crumb[]; children?: ReactNode }) {
+export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?: string; crumbs?: Crumb[]; children?: ReactNode }) {
   return (
     <header className="topbar">
       <a className="brand" href="#/">
         Stage<span className="brand-dot">.</span>
       </a>
+      {back && (
+        <button className="back" onClick={() => goBack(back)}>
+          ← Back
+        </button>
+      )}
       {crumbs.length > 0 && (
         <nav className="crumbs">
           {crumbs.map((c, i) => (

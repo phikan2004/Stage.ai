@@ -29,7 +29,7 @@ const lines = (text: string) => text.split("\n").map((l) => l.trim()).filter(Boo
 function describeEvent(e: any): string | null {
   if (e.type === "action") return e.action;
   if (e.type === "blocked") return `Blocked: ${e.action}. ${e.reason}`;
-  if (e.type === "replanned") return "The screen changed, so it will decide again when it hears the cue";
+  if (e.type === "replanned") return "The screen changed, so it will decide again when it hears the trigger";
   return null;
 }
 
@@ -197,7 +197,7 @@ export default function ShowView({ id }: { id: string }) {
   if (!show) {
     return (
       <>
-        <TopBar tab="demos" />
+        <TopBar tab="demos" back="/demos" />
         <main className="page">{error ? <div className="banner err">{error}</div> : <Loading />}</main>
       </>
     );
@@ -208,11 +208,11 @@ export default function ShowView({ id }: { id: string }) {
 
   return (
     <>
-      <TopBar tab="demos" crumbs={[...(project ? [{ label: project.name, to: `/m/${project.id}` }] : []), { label: show.name }]} />
+      <TopBar tab="demos" back="/demos" crumbs={[...(project ? [{ label: project.name, to: `/m/${project.id}` }] : []), { label: show.name }]} />
       <main className="page">
         <div className="page-head">
           <div>
-            <div className="micro">Demo · {show.beats.length ? plural(show.beats.length, "beat") : "not taught yet"}</div>
+            <div className="micro">Demo · {show.beats.length ? plural(show.beats.length, "cue") : "not taught yet"}</div>
             <h1 className="display">{show.name}</h1>
           </div>
           <div className="page-actions">
@@ -249,7 +249,7 @@ export default function ShowView({ id }: { id: string }) {
               <button className="btn primary" disabled={!ready} onClick={startRecording}>
                 {show.beats.length ? "Record again" : "Start recording"}
               </button>
-              {show.beats.length > 0 && <span className="hint">Recording again replaces these beats and their scores.</span>}
+              {show.beats.length > 0 && <span className="hint">Recording again replaces these cues and their scores.</span>}
             </div>
           )}
           <p className="hint stage-notice">
@@ -297,15 +297,15 @@ export default function ShowView({ id }: { id: string }) {
               {lastRun && (
                 <div className="banner">
                   {lastRun.results.every((r) => r.outcome === "done") && lastRun.results.length === show.beats.length
-                    ? "Every beat passed."
-                    : `Stopped: ${lastRun.results.at(-1)?.summary ?? "no beats ran."}`}
+                    ? "Every cue passed."
+                    : `Stopped: ${lastRun.results.at(-1)?.summary ?? "no cues ran."}`}
                 </div>
               )}
             </section>
 
             <section className="section">
               <div className="section-head">
-                <h2 className="display">Beats</h2>
+                <h2 className="display">Cues</h2>
                 <span className="hint">What the AI learned. Add corrections in Notes.</span>
               </div>
               <div className="stage-beats">
@@ -314,8 +314,8 @@ export default function ShowView({ id }: { id: string }) {
                   return (
                     <article key={`${show.recordingId}-${b.id}`} className={`stage-beat ${activeBeat === b.id ? "active" : ""}`}>
                       <div className="stage-beat-head">
-                        <span className="micro">Beat {i + 1}</span>
-                        <input className="field" value={b.label} aria-label="Beat name" onChange={(e) => editBeat(b, { label: e.target.value })} />
+                        <span className="micro">Cue {i + 1}</span>
+                        <input className="field" value={b.label} aria-label="Cue name" onChange={(e) => editBeat(b, { label: e.target.value })} />
                         <span className="hint">{score.total ? `${score.passed} of ${score.total} dry runs passed` : "No dry runs yet"}</span>
                       </div>
                       <label className="stage-field">
@@ -327,7 +327,7 @@ export default function ShowView({ id }: { id: string }) {
                         <textarea className="field" value={b.success} onChange={(e) => editBeat(b, { success: e.target.value })} />
                       </label>
                       <label className="stage-field">
-                        <span className="hint">Cue words, one per line</span>
+                        <span className="hint">Trigger words, one per line</span>
                         <textarea className="field" defaultValue={b.cues.join("\n")} onBlur={(e) => editBeat(b, { cues: lines(e.target.value) })} />
                       </label>
                       <label className="stage-field">
