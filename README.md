@@ -53,16 +53,18 @@ It has two parts: the runner in `runner/`, a local process with a Swift helper f
 The app has three tabs: Projects, Decks and Demos. A project holds decks and demos together, and either can also stand on
 its own. It runs on your Mac because a web page can't control other apps and Vercel can't reach your computer.
 
-To teach a demo, start both of these in Terminal, then open <http://localhost:5180> and choose New → Demo. The first
-time, open the pairing link the runner prints.
+Stage runs in the background whenever you're logged in, so there's nothing to start: open <http://localhost:5180> and
+choose New → Demo. The page pairs with the runner by itself, and until the runner is ready it says what it's waiting
+for. Set it up once per Mac:
 
 ```bash
-npm run stage:dev
+npm run stage:install
 ```
 
-```bash
-npm run stage
-```
+That adds a login item running `npm run stage:dev` (the app, its server and the runner), restarts it if it stops, and
+logs to `data/stage-agent.log`. The first time, macOS asks to allow Accessibility and Screen Recording for `node`;
+allow both. Any Node program on this Mac then shares those permissions. `npm run stage:uninstall` removes it. To run
+Stage by hand instead, uninstall and use `npm run stage:dev`.
 
 1. **Teach:** press Start recording, do the demo on the audience display while talking through it, then press Stop and
    learn. Only that display, what you do on it, and your voice are recorded. Password fields aren't. Recordings are
@@ -79,12 +81,14 @@ npm run stage
    Right arrow also move on. Each cue is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
    to its starting state yourself between runs.
 
-`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using demos
-with Supabase needs the `producer.shows` migration, which applies when it reaches production.
+`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. The runner
+also works with the regular dev app (`npm run dev`, <http://localhost:5173>), whose demos are saved to Supabase; their
+recordings still stay on this Mac. Using demos with Supabase needs the `producer.shows` migration, which applies when it
+reaches production.
 
 | Command | What it does |
 |---|---|
-| `npm run stage` | Starts the runner for the Demos tab |
+| `npm run stage` | Starts just the runner (`stage:dev` already does) |
 | `npm run stage -- --setup` | Asks macOS for Accessibility and Screen Recording, and lists your displays |
 | `npm run stage -- --look` | Prints what it sees on the stage display |
 | `npm run stage -- --try textedit` | Performs one action with no AI (`browser`, `terminal` or `textedit`) |

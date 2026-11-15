@@ -6,7 +6,7 @@ import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
 import { deckTitle, plural } from "../lib/format";
 import { go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
-import { Loading, NameDialog, TopBar, type Tab } from "./Chrome";
+import { Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
 
 const INTRO: Record<Tab, { title: ReactNode; line: string }> = {
   projects: {
@@ -600,17 +600,12 @@ function NewMenu({ projects, current }: { projects: MatterSummary[]; current?: M
 
 function ProjectSelect({ projects, value, onChange }: { projects: MatterSummary[]; value: string; onChange: (id: string) => void }) {
   return (
-    <label>
-      <span className="micro">Project</span>
-      <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value={NO_PROJECT}>No project</option>
-        {projects.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      label="Project"
+      value={value}
+      onChange={onChange}
+      options={[{ value: NO_PROJECT, label: "No project" }, ...projects.map((m) => ({ value: m.id, label: m.name }))]}
+    />
   );
 }
 

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { connectionAllowed } from "./safety.ts";
+import { connectionAllowed, pairAllowed } from "./safety.ts";
 
 export interface ConsoleServer {
   url: string;
@@ -8,7 +8,7 @@ export interface ConsoleServer {
   close(): void;
 }
 
-/** The link to the Stage console. Binds to this computer only, and takes one known origin plus a pairing token. */
+/** The link to the Stage console. Binds to this computer only, and takes one known origin plus a pairing token, which it hands to that origin at /pair. */
 export function startConsoleServer(opts: {
   port: number;
   origins: string[];
@@ -20,6 +20,13 @@ export function startConsoleServer(opts: {
 }): Promise<ConsoleServer> {
   const http = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname === "/pair") {
+      const origin = req.headers.origin;
+      if (!pairAllowed(origin, opts.origins)) return void res.writeHead(403).end();
+      return void res
+        .writeHead(200, { "content-type": "application/json", "access-control-allow-origin": origin!, vary: "origin", "cache-control": "no-store" })
+        .end(JSON.stringify({ token: opts.token }));
+    }
     const m = /^\/frames\/(.+)$/.exec(url.pathname);
     if (!m || url.searchParams.get("token") !== opts.token) return void res.writeHead(404).end();
     const jpeg = await opts.frame?.(m[1]);
@@ -49,7 +56,8 @@ export function startConsoleServer(opts: {
     });
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    http.once("error", reject);
     http.listen(opts.port, "127.0.0.1", () =>
       resolve({
         url: `ws://127.0.0.1:${opts.port}/?token=${opts.token}`,
