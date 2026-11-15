@@ -49,7 +49,7 @@ const TOOLS = [
   },
   {
     name: "open",
-    description: "Go to a url, or bring an app to the front on the stage display by name.",
+    description: "Go to a url in a new window on the stage display, or bring an app to the front there by name.",
     strict: true,
     input_schema: { ...strict, properties: { target: { type: "string" } }, required: ["target"] },
   },

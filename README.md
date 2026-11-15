@@ -27,12 +27,16 @@ whole flow without calling the vision model.
 | `npm run build` | Type-check + production build of the client, type-check of the server |
 | `npm run make-sample` | Regenerates `client/public/sample/sample.pdf` + `sample.regions.json` |
 
-## Matters, presentations and runs
+## Projects, decks, demos and runs
 
-- **Home** (`#/`) lists your matters, most recently active first.
-- A **matter** is one project. It holds its presentations (PowerPoint or PDF). Click **New
-  matter** to start one, and use the switch to choose whether it holds one presentation or more than one. A
-  one-presentation matter hides **Add a presentation** until its deck is deleted.
+- The top bar has three tabs: **Projects** (`#/projects`), **Decks** (`#/`) and **Demos** (`#/demos`). Each can be
+  sorted and searched.
+- **New** adds a project, a deck (PowerPoint or PDF, several at once) or a demo. A deck or demo goes into a project or
+  stands on its own.
+- A **project** (`#/m/<id>`) lists its decks and demos as rows. Click one to see more, then open it. In the code and
+  database a project is still called a matter; a deck or demo on its own lives in a hidden one (`solo`).
+- A demo's cover is a screenshot from its recording, chosen on the demo's page. It's served by the runner on your Mac,
+  so it only shows while the runner is running.
 - A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
   records the slides shown, every zoom, every voice command and what was heard. Run history isn't linked from the
   app right now, but runs are still saved and each one's page still works at `#/r/<id>`.
@@ -44,10 +48,11 @@ Stage is an AI operator for live software demos: you talk, and it performs the d
 from the real screen, and nothing is replayed. While you're still talking, it decides its next actions and holds them
 until you reach that moment, then checks the screen hasn't changed and runs them. If it has changed, it decides again.
 
-It has two parts: the runner in `runner/`, a local process with a Swift helper for screen and input, and a Shows section
-in each matter. It runs on your Mac because a web page can't control other apps and Vercel can't reach your computer.
+It has two parts: the runner in `runner/`, a local process with a Swift helper for screen and input, and the Demos tab.
+The app has three tabs: Projects, Decks and Demos. A project holds decks and demos together, and either can also stand on
+its own. It runs on your Mac because a web page can't control other apps and Vercel can't reach your computer.
 
-To teach a show, start both of these in Terminal, then open a matter at <http://localhost:5180> and add a show. The first
+To teach a demo, start both of these in Terminal, then open <http://localhost:5180> and choose New → Demo. The first
 time, open the pairing link the runner prints.
 
 ```bash
@@ -59,19 +64,26 @@ npm run stage
 ```
 
 1. **Teach:** press Start recording, do the demo on the audience display while talking through it, then press Stop and
-   learn. Only that display, what you do on it, and your voice are recorded. Password fields aren't. Recordings stay in
-   `data/recordings/`.
-2. **Review:** check the beats and the limits. Add corrections in each beat's notes.
-3. **Dry run:** the screen goes black while the AI gets ready. Press Space, Return, the Right arrow or Begin on the page,
-   and it performs the show live. Each beat is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
+   learn. Only that display, what you do on it, and your voice are recorded. Password fields aren't. Recordings are
+   saved in `data/recordings/`. To learn the demo, screenshots, what you typed and what you said are sent to Claude, and
+   your voice goes to the speech service as you talk. Known key and password formats are hidden from that text, but
+   screenshots are sent as they are, so keep real secrets off the stage display.
+2. **Review:** check the beats and the limits, including which risky buttons it may press. Add corrections in each
+   beat's notes.
+3. **Dry run:** the screen goes black while the AI gets ready, and the mic comes on. Say the first beat's cue (one of
+   its phrases or two of its words) and it performs that beat live. After that it follows you the way a person helping
+   would: once a beat is done, the next one runs as soon as you mention it, when you finish your thought (1.5 s quiet),
+   or after 3 s if you say nothing. A short "hold on", "wait" or "stop" holds it, and "go ahead" or "next" carries on.
+   Those only count as a short sentence of their own, so "I can't wait to show you" won't hold it. Space, Return or the
+   Right arrow also move on. Each beat is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
    to its starting state yourself between runs.
 
-`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using Shows
+`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. Using demos
 with Supabase needs the `producer.shows` migration, which applies when it reaches production.
 
 | Command | What it does |
 |---|---|
-| `npm run stage` | Starts the runner for the Shows page |
+| `npm run stage` | Starts the runner for the Demos tab |
 | `npm run stage -- --setup` | Asks macOS for Accessibility and Screen Recording, and lists your displays |
 | `npm run stage -- --look` | Prints what it sees on the stage display |
 | `npm run stage -- --try textedit` | Performs one action with no AI (`browser`, `terminal` or `textedit`) |
@@ -84,10 +96,13 @@ Enter or a clicker's PageDown releases held actions. Double Esc stops everything
 
 **Before using this for real, create a separate macOS user account** with only demo logins and data. An AI with mouse
 and keyboard control can reach anything the logged-in user can. Permissions belong to the app you start the runner
-from, such as Terminal. Grant them in System Settings → Privacy & Security, then restart that app.
+from, such as Terminal. Grant them in System Settings → Privacy & Security, then restart that app. The first time a demo opens a website, macOS also asks
+whether that app may control Google Chrome. Allow it, because that's how a site gets its own window on the stage display.
 
-Safety limits: the agent only acts in the apps and web origins you allow, on the stage display. It asks you before
-typing terminal commands you haven't taught it, and before clicking things like Delete, Send or Pay. It treats on-screen
+Safety limits: the agent only acts in the apps and web origins you allow, on the stage display. During a demo it refuses
+terminal commands you haven't taught it, and buttons like Delete, Send or Pay unless you pressed them while teaching or
+added them in review. `--goal` runs from the command line ask you instead. It recognizes risky buttons by their names in
+English, so an unlabelled icon isn't caught. It treats on-screen
 text as data, never as instructions, and has a limit on actions and time per beat. It needs two displays for desktop
 control.
 
@@ -134,8 +149,8 @@ check, which doesn't work with TypeScript 7. Vercel still bundles the server.
 
 ## Flow
 
-1. **Add a presentation** to a matter: drop a PowerPoint (`.pptx`) or PDF on the **Add a presentation** card. The original
-   file is stored in the matter, and each slide is rendered to an image in the browser, with `@silurus/ooxml` for
+1. **Add a deck** with New → Deck and choose a PowerPoint (`.pptx`) or PDF. The original
+   file is stored, and each slide is rendered to an image in the browser, with `@silurus/ooxml` for
    PowerPoint and pdf.js for PDF. Slides hidden in PowerPoint are left out and animations show their final state.
    Fonts that aren't embedded or available fall back to substitutes (Carlito for Calibri, from Google Fonts). Older
    `.ppt` files and password-protected decks aren't supported.
@@ -263,6 +278,7 @@ Two engines sit behind the same `SpeechSource` interface (`client/src/speech/`),
   The current slide's keywords and labels are sent as `keyterm` boosts, so terms like "Q1" or "APAC" are recognized
   reliably, and they're updated mid-stream on each slide change. Get a key at console.deepgram.com → API Keys. It
   needs the **Member** role or higher, because lower roles can't create tokens.
+- Streams set Deepgram's `mip_opt_out`, so audio isn't kept for model training.
 - **Chrome built-in** (Web Speech API). Free, no key, but slower to settle and no keyword boosting.
 
 `ScriptedSpeechSource` replays a timestamped script and powers the debug panel's simulate box. To add another

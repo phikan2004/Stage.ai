@@ -55,7 +55,7 @@ export interface Library {
   run(id: string): Promise<RunDetail | null>;
   deckFile(deckId: string): Promise<DeckFileSource | null>;
   thumb(deckId: string): Promise<Buffer | null>;
-  createMatter(name: string, deckMode: DeckMode): Promise<Matter>;
+  createMatter(name: string, deckMode: DeckMode, solo: boolean): Promise<Matter>;
   renameMatter(id: string, name: string): Promise<Matter | null>;
   deleteMatter(id: string): Promise<boolean>;
   /** Reserves a deck id and says where to send its file; null if the matter doesn't exist. */
@@ -69,6 +69,7 @@ export interface Library {
   addRun(input: RunInput): Promise<Run | null>;
   deleteRun(id: string): Promise<boolean>;
   shows(matterId: string): Promise<Show[] | null>;
+  allShows(): Promise<Show[]>;
   show(id: string): Promise<Show | null>;
   createShow(matterId: string, name: string): Promise<Show | null>;
   patchShow(id: string, patch: ShowPatch): Promise<Show | null>;
@@ -123,7 +124,11 @@ export class FileStore implements Library {
     await mkdir(join(this.dir, "decks"), { recursive: true });
     try {
       this.db = { ...this.db, ...JSON.parse(await readFile(this.dbPath, "utf8")) };
-      for (const m of this.db.matters) m.deckMode ??= "multiple";
+      for (const m of this.db.matters) {
+        m.deckMode ??= "multiple";
+        m.solo ??= false;
+      }
+      for (const s of this.db.shows) s.cover ??= null;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
@@ -184,7 +189,8 @@ export class FileStore implements Library {
         thumbDeckId: decks.find((d) => d.hasThumb)?.id ?? null,
       };
     });
-    return { matters, runs: this.recentRuns() };
+    const decks = [...this.db.decks].sort(byRecent).map((d) => this.deckSummary(d));
+    return { matters, decks, runs: this.recentRuns() };
   }
 
   async matter(id: string): Promise<MatterDetail | null> {
@@ -203,7 +209,8 @@ export class FileStore implements Library {
   async deck(id: string): Promise<DeckDetail | null> {
     const d = this.db.decks.find((x) => x.id === id);
     if (!d) return null;
-    return { ...d, matterName: this.db.matters.find((m) => m.id === d.matterId)?.name ?? "" };
+    const m = this.db.matters.find((x) => x.id === d.matterId);
+    return { ...d, matterName: m?.name ?? "", matterSolo: m?.solo ?? false };
   }
 
   async run(id: string): Promise<RunDetail | null> {
@@ -225,9 +232,9 @@ export class FileStore implements Library {
 
   /* ---------- writes ---------- */
 
-  async createMatter(name: string, deckMode: DeckMode): Promise<Matter> {
+  async createMatter(name: string, deckMode: DeckMode, solo: boolean): Promise<Matter> {
     const now = Date.now();
-    const m: Matter = { id: newId(), name, deckMode, createdAt: now, updatedAt: now };
+    const m: Matter = { id: newId(), name, deckMode, solo, createdAt: now, updatedAt: now };
     this.db.matters.push(m);
     await this.save();
     return m;
@@ -379,6 +386,10 @@ export class FileStore implements Library {
     return this.db.shows.filter((x) => x.matterId === matterId).sort(byRecent);
   }
 
+  async allShows(): Promise<Show[]> {
+    return [...this.db.shows].sort(byRecent);
+  }
+
   async show(id: string): Promise<Show | null> {
     return this.db.shows.find((x) => x.id === id) ?? null;
   }
@@ -386,7 +397,7 @@ export class FileStore implements Library {
   async createShow(matterId: string, name: string): Promise<Show | null> {
     if (!this.db.matters.some((m) => m.id === matterId)) return null;
     const now = Date.now();
-    const show: Show = { id: newId(), matterId, name, beats: [], limits: { apps: [], origins: [], commands: [] }, recordingId: null, dryRuns: [], createdAt: now, updatedAt: now };
+    const show: Show = { id: newId(), matterId, name, beats: [], limits: { apps: [], origins: [], commands: [], actions: [] }, recordingId: null, cover: null, dryRuns: [], createdAt: now, updatedAt: now };
     this.db.shows.push(show);
     this.touchMatter(matterId, now);
     await this.save();

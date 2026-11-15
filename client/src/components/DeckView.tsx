@@ -137,14 +137,13 @@ export default function DeckView({ id }: { id: string }) {
   }
 
   const crumbs = [
-    { label: "Matters", to: "/" },
-    { label: detail?.matterName || "…", to: detail ? `/m/${detail.matterId}` : undefined },
+    ...(detail?.matterSolo ? [] : [{ label: detail?.matterName || "…", to: detail ? `/m/${detail.matterId}` : undefined }]),
     { label: detail ? deckTitle(detail.name) : "…" },
   ];
 
   return (
     <div className="deck-page">
-      <TopBar crumbs={crumbs}>
+      <TopBar tab="decks" crumbs={crumbs}>
         {deck && (
           <>
             <span className={`save-state ${saveState}`}>

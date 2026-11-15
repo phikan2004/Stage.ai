@@ -158,6 +158,8 @@ export const MatterSchema = z.object({
   id: Id,
   name: z.string().trim().min(1).max(200),
   deckMode: DeckModeSchema,
+  /** holds one deck or demo on its own: not shown as a project */
+  solo: z.boolean(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -281,7 +283,7 @@ export const BeatSchema = z.object({
   success: z.string(),
   /** the presenter's own words for this moment */
   cues: z.array(z.string().min(1)),
-  /** reference screenshots, by file name in the recording. They stay on the presenter's Mac. */
+  /** reference screenshots, by file name in the recording. Stored on the presenter's Mac and sent to Claude when learning and running the demo. */
   landmarks: z.array(z.string()),
   /** corrections from dry runs */
   notes: z.string(),
@@ -292,8 +294,10 @@ export type Beat = z.infer<typeof BeatSchema>;
 export const ShowLimitsSchema = z.object({
   apps: z.array(z.string().min(1)),
   origins: z.array(z.string().min(1)),
-  /** terminal commands seen in the recording; anything else needs approval */
+  /** terminal commands seen in the recording; anything else is refused during a demo */
   commands: z.array(z.string().min(1)),
+  /** risky buttons the presenter pressed in the recording; any others are refused during a demo. Older shows don't have it. */
+  actions: z.array(z.string().min(1)).default([]),
 });
 export type ShowLimits = z.infer<typeof ShowLimitsSchema>;
 
@@ -323,13 +327,15 @@ export const ShowSchema = z.object({
   limits: ShowLimitsSchema,
   /** the local recording the beats were learned from */
   recordingId: z.string().nullable(),
+  /** the recording frame shown as its cover; stays on the presenter's Mac like the rest */
+  cover: z.string().nullable(),
   dryRuns: z.array(DryRunSchema).max(MAX_DRY_RUNS),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
 export type Show = z.infer<typeof ShowSchema>;
 
-export const ShowPatchSchema = ShowSchema.pick({ name: true, beats: true, limits: true, recordingId: true, dryRuns: true }).partial();
+export const ShowPatchSchema = ShowSchema.pick({ name: true, beats: true, limits: true, recordingId: true, cover: true, dryRuns: true }).partial();
 export type ShowPatch = z.infer<typeof ShowPatchSchema>;
 
 /** Passed dry runs out of all that reached this beat. */
@@ -350,6 +356,8 @@ export type MatterSummary = Matter & {
 };
 export interface HomeData {
   matters: MatterSummary[];
+  /** every deck, most recently touched first */
+  decks: DeckSummary[];
   runs: RunSummary[];
 }
 export interface MatterDetail {
@@ -357,7 +365,7 @@ export interface MatterDetail {
   decks: DeckSummary[];
   runs: RunSummary[];
 }
-export type DeckDetail = DeckRecord & { matterName: string };
+export type DeckDetail = DeckRecord & { matterName: string; matterSolo: boolean };
 export type RunDetail = Run & { matterName: string; deckExists: boolean };
 
 /** One billed Claude call during analysis: the whole-deck plan, a slide, or one region the presenter drew. */
