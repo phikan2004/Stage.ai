@@ -6,7 +6,7 @@ import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
 import { deckTitle, plural } from "../lib/format";
 import { go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
-import { Loading, NameDialog, TopBar, type Tab } from "./Chrome";
+import { Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
 
 const INTRO: Record<Tab, { title: ReactNode; line: string }> = {
   projects: {
@@ -181,15 +181,7 @@ function Overview({
         <div className="empty-row">Nothing matches “{query.trim()}”.</div>
       ) : (
         <div className="cards library">
-          <button className="card project-card card-start" onClick={() => startNew(tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo")}>
-            <div className="card-img">
-              <span className="plus">+</span>
-            </div>
-            <div className="card-body">
-              <div className="card-title">New {tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo"}</div>
-              <div className="hint">You don't have any {what} yet.</div>
-            </div>
-          </button>
+          <StartCard kind={tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo"} hint={`You don't have any ${what} yet.`} />
         </div>
       )}
 
@@ -258,7 +250,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
             ))}
           </div>
         ) : (
-          <div className="empty-row">No decks in this project yet. Add one with New.</div>
+          <div className="cards library">
+            <StartCard kind="deck" hint="This project has no decks yet." />
+          </div>
         )}
       </section>
 
@@ -291,7 +285,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
             ))}
           </div>
         ) : (
-          <div className="empty-row">No demos in this project yet. Add one with New.</div>
+          <div className="cards library">
+            <StartCard kind="demo" hint="This project has no demos yet." />
+          </div>
         )}
       </section>
 
@@ -310,6 +306,21 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
         />
       )}
     </>
+  );
+}
+
+/** Shown where nothing exists yet; opens the same flow as New, into the open project if there is one. */
+function StartCard({ kind, hint }: { kind: NewKind; hint: string }) {
+  return (
+    <button className="card project-card card-start" onClick={() => startNew(kind)}>
+      <div className="card-img">
+        <span className="plus">+</span>
+      </div>
+      <div className="card-body">
+        <div className="card-title">New {kind}</div>
+        <div className="hint">{hint}</div>
+      </div>
+    </button>
   );
 }
 
@@ -589,17 +600,12 @@ function NewMenu({ projects, current }: { projects: MatterSummary[]; current?: M
 
 function ProjectSelect({ projects, value, onChange }: { projects: MatterSummary[]; value: string; onChange: (id: string) => void }) {
   return (
-    <label>
-      <span className="micro">Project</span>
-      <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value={NO_PROJECT}>No project</option>
-        {projects.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      label="Project"
+      value={value}
+      onChange={onChange}
+      options={[{ value: NO_PROJECT, label: "No project" }, ...projects.map((m) => ({ value: m.id, label: m.name }))]}
+    />
   );
 }
 

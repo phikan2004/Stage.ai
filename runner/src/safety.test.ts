@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { elementPrint, sameFingerprint } from "./driver.ts";
-import { actionTaught, appAllowed, commandTaught, consoleOnStage, openTarget, connectionAllowed, insideBounds, keyBlocked, normalizeCombo, originAllowed, riskyName, toScreen, type Limits } from "./safety.ts";
+import { actionTaught, appAllowed, commandTaught, consoleOnStage, openTarget, connectionAllowed, insideBounds, keyBlocked, normalizeCombo, originAllowed, pairAllowed, riskyName, toScreen, type Limits } from "./safety.ts";
 
 const limits: Limits = { apps: ["TextEdit", "com.apple.Terminal"], origins: ["http://localhost:5173"], taughtCommands: ["npm test"], taughtActions: ["Send invoice"] };
 const stage = { x: 1920, y: 0, width: 1920, height: 1080 };
@@ -114,6 +114,13 @@ describe("local connection", () => {
     expect(connectionAllowed("https://evil.example", "t", expected)).toBe(false);
     expect(connectionAllowed("http://localhost:5173", "nope", expected)).toBe(false);
     expect(connectionAllowed(undefined, "t", expected)).toBe(false);
+  });
+
+  it("hands the token only to the console's own origin", () => {
+    expect(pairAllowed("http://localhost:5173", expected.origins)).toBe(true);
+    expect(pairAllowed("https://evil.example", expected.origins)).toBe(false);
+    expect(pairAllowed("http://localhost:5173.evil.example", expected.origins)).toBe(false);
+    expect(pairAllowed(undefined, expected.origins)).toBe(false);
   });
 });
 

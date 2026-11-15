@@ -1,21 +1,9 @@
-import { useEffect } from "react";
 import DeckView from "./components/DeckView";
 import LibraryView from "./components/LibraryView";
 import RunView from "./components/RunView";
 import ShowView from "./components/ShowView";
 import { Loading, TopBar } from "./components/Chrome";
-import { go, useRoute } from "./lib/router";
-import { saveStageToken } from "./lib/stage";
-
-function Pair({ token }: { token: string }) {
-  useEffect(() => {
-    saveStageToken(token);
-    go("/");
-    // Setting the hash it already has fires nothing, and this page would stay here.
-    window.dispatchEvent(new HashChangeEvent("hashchange"));
-  }, [token]);
-  return <Loading text="Pairing…" />;
-}
+import { useRoute } from "./lib/router";
 
 export default function App() {
   const [kind, id] = useRoute();
@@ -26,7 +14,6 @@ export default function App() {
   if (kind === "d" && id) return <DeckView key={id} id={id} />;
   if (kind === "r" && id) return <RunView key={id} id={id} />;
   if (kind === "s" && id) return <ShowView key={id} id={id} />;
-  if (kind === "pair" && id) return <Pair token={id} />;
   return (
     <>
       <TopBar />

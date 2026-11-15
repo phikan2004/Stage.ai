@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Hash routes: "#/" (Decks), "#/demos" (Demos), "#/projects" (Projects), "#/m/<matter>" (one project; "/demo" after it is the same page), "#/d/<deck>", "#/r/<run>", "#/s/<show>", "#/pair/<token>". */
+/** Hash routes: "#/" (Decks), "#/demos" (Demos), "#/projects" (Projects), "#/m/<matter>" (one project; "/demo" after it is the same page), "#/d/<deck>", "#/r/<run>", "#/s/<show>". */
 export function useRoute(): string[] {
   const [hash, setHash] = useState(() => location.hash);
   useEffect(() => {
