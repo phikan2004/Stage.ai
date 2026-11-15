@@ -1,5 +1,5 @@
 import { chromium, type BrowserContext, type Page } from "playwright-core";
-import type { ClickKind, Direction, Driver, Element, Fingerprint, View, Where } from "./driver.ts";
+import { elementPrint, type ClickKind, type Direction, type Driver, type Element, type Fingerprint, type View, type Where } from "./driver.ts";
 import { originAllowed, type Limits } from "./safety.ts";
 
 const JPEG_QUALITY = 70;
@@ -46,7 +46,7 @@ function collect(tag: boolean) {
   return out;
 }
 
-const elementKey = (url: string, elements: Pick<Element, "role" | "name">[]) => [url, ...elements.map((e) => `${e.role}:${e.name}`)].join("|");
+const printOf = (e: Pick<Element, "role" | "name" | "frame">) => elementPrint({ role: e.role, name: e.name, x: e.frame.x, y: e.frame.y });
 
 /** Real Chrome with its own profile, on the stage display. Pages outside the allowlist don't load. */
 export class BrowserDriver implements Driver {
@@ -88,7 +88,7 @@ export class BrowserDriver implements Driver {
 
   async fingerprint(): Promise<Fingerprint> {
     const page = await this.active();
-    return { key: elementKey(page.url(), await page.evaluate(collect, false)) };
+    return { key: page.url(), elements: (await page.evaluate(collect, false)).map(printOf) };
   }
 
   async look(): Promise<View> {
@@ -100,8 +100,8 @@ export class BrowserDriver implements Driver {
     return {
       ...(await this.where()),
       shot: { data: buf.toString("base64"), ...size },
-      elements,
-      fingerprint: { key: elementKey(page.url(), elements) },
+      elements: elements.map((e) => ({ ...e, print: printOf(e) })),
+      fingerprint: { key: page.url(), elements: elements.map(printOf) },
     };
   }
 

@@ -15,7 +15,9 @@ class FakeDriver implements Driver {
   async look(): Promise<View> {
     return { ...(await this.where()), shot: { data: "", width: 800, height: 600 }, elements: [SAVE, DELETE], fingerprint: { key: this.screen } };
   }
-  async fingerprint() {
+  quickChecks = 0;
+  async fingerprint(quick?: boolean) {
+    if (quick) this.quickChecks++;
     return { key: this.screen };
   }
   async click(_k: string, x: number, y: number) {
@@ -57,7 +59,7 @@ const options = (driver: Driver, model: Model, over: Partial<BeatOptions> = {}):
   goal: "Save it",
   driver,
   model,
-  limits: { apps: ["Chrome"], origins: ["http://localhost:5173"], taughtCommands: [] },
+  limits: { apps: ["Chrome"], origins: ["http://localhost:5173"], taughtCommands: [], taughtActions: [] },
   hold: true,
   release: Promise.resolve(),
   approve: async () => true,
@@ -98,12 +100,78 @@ describe("prepare and hold", () => {
     await tick();
     expect(d.log).toEqual([]);
     expect(events).toContain("replanned");
+    expect(seen).toHaveLength(1);
     release();
     const r = await beat;
     expect(r.replans).toBe(1);
     expect(d.log).toEqual(["click 60,80"]);
     const refused = seen[1].at(-1).content[0];
     expect(refused).toMatchObject({ type: "tool_result", tool_use_id: "a", is_error: true });
+  });
+
+  it("waits for the cue however much a busy screen changes, and only then decides again", async () => {
+    const d = fakeDriver();
+    const { model, seen } = script(reply([call("a", "click_element", { ref: "e1" })]), reply([call("b", "click_element", { ref: "e1" })]));
+    let release = () => {};
+    const beat = runBeat(options(d, model, { release: new Promise((r) => (release = r)) }));
+    await tick();
+    for (let i = 0; i < 6; i++) {
+      d.screen = `busy-${i}`;
+      await tick(10);
+    }
+    expect(seen).toHaveLength(1);
+    expect(d.log).toEqual([]);
+    release();
+    const r = await beat;
+    expect(r.outcome).toBe("done");
+    expect(r.replans).toBe(1);
+    expect(d.log).toEqual(["click 60,30"]);
+  });
+
+  it("keeps holding through a flicker that doesn't touch its target", async () => {
+    const d = fakeDriver();
+    const hint = (name: string) => ({ ...SAVE, ref: "e3", name: "", print: `hint:${name}` });
+    let placeholder = "How can I help you today?";
+    const prints = () => ["save", "delete", `hint:${placeholder}`];
+    d.look = async () => ({ ...(await d.where()), shot: { data: "", width: 800, height: 600 }, elements: [{ ...SAVE, print: "save" }, DELETE, hint(placeholder)], fingerprint: { key: "page", elements: prints() } });
+    d.fingerprint = async () => ({ key: "page", elements: prints() });
+    const { model } = script(reply([call("a", "click_element", { ref: "e1" })]));
+    let release = () => {};
+    const beat = runBeat(options(d, model, { release: new Promise((r) => (release = r)) }));
+    await tick();
+    placeholder = "Type / for commands";
+    await tick();
+    release();
+    const r = await beat;
+    expect(r.replans).toBe(0);
+    expect(d.log).toEqual(["click 60,30"]);
+  });
+
+  it("decides again when its own target goes, even if little else changed", async () => {
+    const d = fakeDriver();
+    let prints = ["save", "delete"];
+    d.look = async () => ({ ...(await d.where()), shot: { data: "", width: 800, height: 600 }, elements: [{ ...SAVE, print: "save" }, DELETE], fingerprint: { key: "page", elements: prints } });
+    d.fingerprint = async () => ({ key: "page", elements: prints });
+    const { model } = script(reply([call("a", "click_element", { ref: "e1" })]));
+    let release = () => {};
+    const beat = runBeat(options(d, model, { release: new Promise((r) => (release = r)) }));
+    await tick();
+    prints = ["saving", "delete"];
+    await tick();
+    release();
+    expect((await beat).replans).toBe(1);
+  });
+
+  it("checks quickly at the cue, and fully while waiting", async () => {
+    const d = fakeDriver();
+    const { model } = script(reply([call("a", "click_element", { ref: "e1" })]));
+    let release = () => {};
+    const beat = runBeat(options(d, model, { release: new Promise((r) => (release = r)) }));
+    await tick();
+    expect(d.quickChecks).toBe(0);
+    release();
+    await beat;
+    expect(d.quickChecks).toBe(1);
   });
 
   it("re-checks at the cue itself", async () => {
@@ -177,6 +245,30 @@ describe("limits", () => {
     await runBeat(options(d, model, { approve: async (q) => (asked.push(q), false) }));
     expect(asked).toEqual(['Click "Delete account" in Chrome']);
     expect(d.log).toEqual([]);
+  });
+
+  it("refuses a risky click when no one can approve it, and tells the model why", async () => {
+    const d = fakeDriver();
+    const { model, seen } = script(reply([call("a", "click_element", { ref: "e2" })]));
+    await runBeat(options(d, model, { approve: undefined }));
+    expect(d.log).toEqual([]);
+    expect(seen[1].at(-1).content[0]).toMatchObject({ is_error: true, content: expect.stringContaining("didn't teach") });
+  });
+
+  it("refuses an untaught terminal command when no one can approve it", async () => {
+    const d = fakeDriver();
+    d.look = async () => ({ ...(await d.where()), bundleId: "com.apple.Terminal", shot: { data: "", width: 800, height: 600 }, elements: [], fingerprint: { key: d.screen } });
+    const { model } = script(reply([call("a", "type", { text: "rm -rf ~" }, "computer")]));
+    await runBeat(options(d, model, { approve: undefined }));
+    expect(d.log).toEqual([]);
+  });
+
+  it("runs a risky action the presenter taught, without asking", async () => {
+    const d = fakeDriver();
+    const { model } = script(reply([call("a", "click_element", { ref: "e2" })]));
+    const limits = { apps: ["Chrome"], origins: ["http://localhost:5173"], taughtCommands: [], taughtActions: ["delete account"] };
+    await runBeat(options(d, model, { approve: undefined, limits }));
+    expect(d.log).toEqual(["click 60,80"]);
   });
 
   it("stops while waiting for an approval", async () => {

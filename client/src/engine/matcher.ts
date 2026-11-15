@@ -33,7 +33,7 @@ export interface RegionScore {
 }
 
 /** Precompute per-slide region terms. Call once per slide, not per tick. */
-export function compileRegions(regions: Region[], labelWeight: number): CompiledRegion[] {
+export function compileRegions(regions: Pick<Region, "id" | "label" | "keywords" | "phrases">[], labelWeight: number): CompiledRegion[] {
   const compiled = regions.map((r) => {
     const stems = new Map<string, number>();
     const phrases: Phrase[] = [];

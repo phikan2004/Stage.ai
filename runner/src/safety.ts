@@ -6,8 +6,10 @@ export interface Limits {
   apps: string[];
   /** web origins, e.g. http://localhost:5173 */
   origins: string[];
-  /** terminal commands the presenter has already shown it; anything else needs approval */
+  /** terminal commands the presenter has already shown it; anything else is refused during a demo */
   taughtCommands: string[];
+  /** risky buttons the presenter pressed while teaching, or added in review */
+  taughtActions: string[];
 }
 
 export const TERMINALS = new Set([
@@ -28,10 +30,16 @@ export function appAllowed(limits: Limits, app: string, bundleId: string): boole
   return limits.apps.some((a) => a.toLowerCase() === app.toLowerCase() || a === bundleId);
 }
 
+/** apple.com and www.apple.com are one site to a presenter, so the allowlist treats them as one. */
+const site = (origin: string) => origin.replace(/^(https?:\/\/)www\./, "$1");
+
+/** A bare address like apple.com is a website, not an app. */
+export const openTarget = (target: string) => (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(target) && !/\.app$/i.test(target) ? `https://${target}` : target);
+
 export function originAllowed(limits: Limits, url: string): boolean {
   try {
     const { protocol, origin } = new URL(url);
-    return protocol === "about:" || protocol === "data:" || limits.origins.includes(origin);
+    return protocol === "about:" || protocol === "data:" || limits.origins.some((o) => site(o) === site(origin));
   } catch {
     return false;
   }
@@ -58,6 +66,8 @@ const RISKY = /\b(delete|remove|erase|destroy|send|publish|post|pay|purchase|buy
 
 export const riskyName = (name: string) => RISKY.test(name);
 
+export const actionTaught = (limits: Limits, name: string) => limits.taughtActions.some((a) => a.trim().toLowerCase() === name.trim().toLowerCase());
+
 /** A terminal command runs without asking only if the presenter already taught it. */
 export function commandTaught(limits: Limits, text: string): boolean {
   const cmd = text.trim();
@@ -78,6 +88,13 @@ export function toScreen(b: Bounds, shotW: number, shotH: number, x: number, y: 
   if (!(x >= 0 && y >= 0 && x < shotW && y < shotH)) throw new Error(`(${x}, ${y}) is outside the stage display`);
   return { x: b.x + (x / shotW) * b.width, y: b.y + (y / shotH) * b.height };
 }
+
+/** The presenter's own Stage page, by its window title. */
+export const isConsole = (title?: string) => /^Stage\b/.test(title ?? "");
+
+/** The Stage page sitting on the display the AI works on: it changes as the AI runs, and the AI would see and could touch it. */
+export const consoleOnStage = (front: { title?: string; frame?: Frame }, stage: Bounds) =>
+  !!front.frame && isConsole(front.title) && insideBounds(stage, front.frame.x + front.frame.width / 2, front.frame.y + front.frame.height / 2);
 
 /* ---------- local connection ---------- */
 

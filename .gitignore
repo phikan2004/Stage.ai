@@ -5,3 +5,5 @@ dist
 .DS_Store
 data
 runner/.build
+practice/tasks.json
+practice/hello.mjs

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { sameFingerprint } from "./driver.ts";
 import type { Display, Helper, Input } from "./helper.ts";
 import { insideBounds } from "./safety.ts";
+import { maskMoments } from "./secrets.ts";
 import { addKey, type Moment } from "./timeline.ts";
 
 const MAX_SIDE = 1568;
@@ -91,8 +92,8 @@ export class Recorder {
     clearInterval(this.timer);
     await this.endRecording?.();
     await Promise.all(this.pendingAfter);
-    this.moments.sort((a, b) => a.t - b.t);
-    await writeFile(join(this.dir, "timeline.json"), JSON.stringify({ startedAt: this.startedAt, moments: this.moments }, null, 1));
-    return this.moments;
+    const moments = maskMoments(this.moments.sort((a, b) => a.t - b.t));
+    await writeFile(join(this.dir, "timeline.json"), JSON.stringify({ startedAt: this.startedAt, moments }, null, 1));
+    return moments;
   }
 }

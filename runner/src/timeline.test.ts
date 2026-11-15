@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addKey, describeMoment, pickFrames, presenterActed, type Moment } from "./timeline.ts";
-import { toPlaybook } from "./learn.ts";
+import { riskyClicks, toPlaybook } from "./learn.ts";
 import { beatGoal, showBrief } from "./session.ts";
 
 const key = (text: string, t = 1, app = "Terminal") => ({ kind: "key" as const, t, app, text });
@@ -82,5 +82,12 @@ describe("what the operator is told", () => {
 
   it("tells the whole story", () => {
     expect(showBrief({ name: "Launch", beats: [b] } as any)).toContain('1. Open: Open it');
+  });
+});
+
+describe("riskyClicks", () => {
+  it("lists the risky buttons the presenter pressed, once each", () => {
+    const click = (name: string) => ({ t: 1, kind: "click" as const, button: "left", app: "Chrome", name });
+    expect(riskyClicks([click("Save"), click("Send invoice"), click("Send invoice"), { t: 2, kind: "said", text: "delete it" }])).toEqual(["Send invoice"]);
   });
 });
