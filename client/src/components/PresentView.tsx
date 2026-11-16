@@ -206,6 +206,11 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     const offs = [source, sim].map((src) =>
       src.onResult((r) => {
         director.current.hear(r.text, r.isFinal, r.timestamp);
+        // Don't wait for the next 100ms tick — score and act immediately on a final result.
+        if (r.isFinal && autoRef.current) {
+          const result = director.current.tick(r.timestamp);
+          if (result.action.type !== "none") apply(result.action);
+        }
         if (!r.isFinal) return;
         const text = r.text.trim();
         if (text) record({ type: "heard", slide: indexRef.current, text, ...(src === sim ? { simulated: true } : {}) });

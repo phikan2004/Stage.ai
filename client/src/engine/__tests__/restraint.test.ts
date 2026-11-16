@@ -41,14 +41,27 @@ describe("restraint", () => {
     expect(state.phase).toBe("idle");
   });
 
-  it("blocks switching during dwell, then allows it", () => {
+  it("blocks switching during dwell, then allows it sooner for a high-confidence competitor", () => {
+    // score 0.8 → effectiveDwell ≈ 3000 * (1 - (0.8-0.45)/0.55) ≈ 1091ms
     const { log } = run([
       [0, S(["a", 0.7], ["b", 0.1])],
-      [1000, S(["b", 0.8], ["a", 0.2])],
-      [2900, S(["b", 0.8], ["a", 0.2])],
+      [1000, S(["b", 0.8], ["a", 0.2])], // 1000 < 1091ms effective dwell — still blocked
+      [1100, S(["b", 0.8], ["a", 0.2])], // 1100 >= 1091ms — switches
       [3000, S(["b", 0.8], ["a", 0.2])],
     ]);
-    expect(log).toEqual(["0:in:a", "3000:in:b"]);
+    expect(log).toEqual(["0:in:a", "1100:in:b"]);
+  });
+
+  it("bypasses dwell entirely on a trigger phrase", () => {
+    const withTrigger: RegionScore[] = [
+      { id: "b", score: 0.8, raw: 0.8, trigger: true },
+      { id: "a", score: 0.2, raw: 0.2 },
+    ];
+    const { log } = run([
+      [0, S(["a", 0.7], ["b", 0.1])],
+      [500, withTrigger], // trigger phrase → effectiveDwell 0ms, switches immediately
+    ]);
+    expect(log).toEqual(["0:in:a", "500:in:b"]);
   });
 
   it("stays zoomed while the region keeps being discussed", () => {
