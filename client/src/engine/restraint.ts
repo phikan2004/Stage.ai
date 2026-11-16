@@ -44,6 +44,23 @@ export function decisiveWinner(scores: RegionScore[], cfg: Cfg): string | null {
 
 const NONE: Action = { type: "none" };
 
+/**
+ * How long to wait before switching away from the current region.
+ * A trigger phrase heard for the competing region drops it to 0.
+ * Very high confidence scales it down proportionally.
+ * Falls back to cfg.minDwellMs for timeout/zoom-out decisions (no competing winner).
+ */
+function effectiveDwellMs(scores: RegionScore[], state: RestraintState, cfg: Cfg): number {
+  const winner = decisiveWinner(scores, cfg);
+  if (!winner || winner === state.regionId) return cfg.minDwellMs;
+  const top = scores.find((s) => s.id === winner);
+  if (!top) return cfg.minDwellMs;
+  if (top.trigger) return 0;
+  const excess = Math.max(0, top.score - cfg.confidenceThreshold);
+  const range = 1 - cfg.confidenceThreshold;
+  return cfg.minDwellMs * Math.max(0, 1 - excess / range);
+}
+
 /** Advance the state machine one tick. Pure. `scores` must be sorted high → low. */
 export function step(state: RestraintState, scores: RegionScore[], now: number, cfg: Cfg): StepResult {
   const winner = decisiveWinner(scores, cfg);
@@ -65,7 +82,7 @@ export function step(state: RestraintState, scores: RegionScore[], now: number, 
     case "zoomed": {
       const current = scores.find((s) => s.id === state.regionId)?.score ?? 0;
       const lastMatchAt = current >= cfg.sustainThreshold ? now : state.lastMatchAt;
-      const dwellDone = now - state.zoomedAt >= cfg.minDwellMs;
+      const dwellDone = now - state.zoomedAt >= effectiveDwellMs(scores, state, cfg);
       const next: RestraintState = { ...state, lastMatchAt, phase: dwellDone ? "zoomed" : "dwell" };
 
       if (!dwellDone) return { state: next, action: NONE };
