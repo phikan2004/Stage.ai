@@ -266,6 +266,7 @@ a.btn { text-decoration: none; color: var(--ink); }
 .tl-t { display: inline-block; min-width: 44px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .tl-ev { font-size: 13px; }
 .tl-ev.zoom b { font-weight: 500; color: var(--accent); }
+.tl-latency { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); margin-left: 6px; background: var(--surface-2, #f0f0f0); border-radius: 3px; padding: 1px 5px; }
 .tl-ev.command { color: var(--ink-2); }
 .tl-said { margin: 0; color: var(--ink-2); line-height: 1.6; }
 .tl-said.sim { font-style: italic; }

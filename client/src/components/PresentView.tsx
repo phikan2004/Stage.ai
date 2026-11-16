@@ -102,9 +102,11 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
 
   // Run history: what happened while presenting, saved when the presenter closes.
   const runLog = useRef({ startedAt: Date.now(), t0: now(), events: [] as RunEvent[] });
+  const lastHeardAt = useRef<number | null>(null);
   const record = useCallback((e: EventInput) => {
     const log = runLog.current;
     if (log.events.length < MAX_RUN_EVENTS) log.events.push({ ...e, t: Math.round(now() - log.t0) } as RunEvent);
+    if (e.type === "heard") lastHeardAt.current = now();
   }, []);
   const engineRef = useRef<Engine | null>(null);
   const onRunEndRef = useRef(onRunEnd);
@@ -126,13 +128,15 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
   }, []);
 
   const apply = useCallback(
-    (a: Action) => {
+    (a: Action, scores?: RegionScore[]) => {
       if (a.type === "zoomTo") {
         setZoomId(a.regionId);
         setLastZoomId(a.regionId);
         const region = regionsRef.current.find((r) => r.id === a.regionId);
         if (region?.cue === "reveal") setRevealed((s) => new Set(s).add(`${indexRef.current}:${region.id}`));
-        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue });
+        const score = scores?.find((s) => s.id === a.regionId)?.score;
+        const latencyMs = lastHeardAt.current != null ? Math.round(now() - lastHeardAt.current) : undefined;
+        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue, score, latencyMs });
       } else if (a.type === "zoomOut") {
         setZoomId(null);
       }
@@ -206,14 +210,15 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     const offs = [source, sim].map((src) =>
       src.onResult((r) => {
         director.current.hear(r.text, r.isFinal, r.timestamp);
-        // Don't wait for the next 100ms tick — score and act immediately on a final result.
-        if (r.isFinal && autoRef.current) {
-          const result = director.current.tick(r.timestamp);
-          if (result.action.type !== "none") apply(result.action);
-        }
         if (!r.isFinal) return;
+        // Record heard before ticking so lastHeardAt is set for latency tracking.
         const text = r.text.trim();
         if (text) record({ type: "heard", slide: indexRef.current, text, ...(src === sim ? { simulated: true } : {}) });
+        // Don't wait for the next 100ms tick — score and act immediately on a final result.
+        if (autoRef.current) {
+          const result = director.current.tick(r.timestamp);
+          if (result.action.type !== "none") apply(result.action, result.scores);
+        }
         commandRef.current(r.text, r.timestamp);
       }),
     );
@@ -244,7 +249,7 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
       let scores: RegionScore[];
       if (autoRef.current) {
         const r = d.tick(t);
-        apply(r.action);
+        apply(r.action, r.scores);
         scores = r.scores;
       } else {
         scores = d.scores(t);

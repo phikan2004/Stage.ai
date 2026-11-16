@@ -19,6 +19,7 @@ export default function DeckView({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
   const [stage, setStage] = useState<Stage>("review");
   const [startSlide, setStartSlide] = useState(0);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>("Loading…");
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -116,7 +117,9 @@ export default function DeckView({ id }: { id: string }) {
         api.beaconRun(input);
         return;
       }
-      api.saveRun(input).catch((e) => console.error("Couldn't save this run", e));
+      api.saveRun(input)
+        .then(({ id: runId }) => setLastRunId(runId))
+        .catch((e) => console.error("Couldn't save this run", e));
     },
     [id],
   );
@@ -167,14 +170,22 @@ export default function DeckView({ id }: { id: string }) {
       {!deck && !error && <Loading text={loading ?? "Loading…"} />}
 
       {deck && stage === "review" && (
-        <ReviewEditor
-          deckId={id}
-          deck={deck}
-          planned={Boolean(detail?.plan)}
-          initialIndex={startSlide}
-          onRegions={setRegions}
-          onPresent={present}
-        />
+        <>
+          {lastRunId && (
+            <div className="banner" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>Run complete.</span>
+              <a className="btn small" href={`#/r/${lastRunId}`}>View run log →</a>
+            </div>
+          )}
+          <ReviewEditor
+            deckId={id}
+            deck={deck}
+            planned={Boolean(detail?.plan)}
+            initialIndex={startSlide}
+            onRegions={setRegions}
+            onPresent={present}
+          />
+        </>
       )}
     </div>
   );

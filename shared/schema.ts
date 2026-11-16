@@ -223,7 +223,7 @@ export type DeckPatch = z.infer<typeof DeckPatchSchema>;
 /** One thing that happened while presenting. `t` is ms since the run started. */
 export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ t: z.number(), type: z.literal("slide"), slide: z.number().int() }),
-  z.object({ t: z.number(), type: z.literal("zoom"), slide: z.number().int(), regionId: z.string(), label: z.string(), cue: CueSchema.optional() }),
+  z.object({ t: z.number(), type: z.literal("zoom"), slide: z.number().int(), regionId: z.string(), label: z.string(), cue: CueSchema.optional(), score: z.number().optional(), latencyMs: z.number().optional() }),
   z.object({ t: z.number(), type: z.literal("command"), slide: z.number().int(), command: z.string(), text: z.string() }),
   z.object({ t: z.number(), type: z.literal("heard"), slide: z.number().int(), text: z.string(), simulated: z.boolean().optional() }),
 ]);
