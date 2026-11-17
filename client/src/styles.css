@@ -221,6 +221,7 @@ a.btn { text-decoration: none; color: var(--ink); }
 .card:hover .card-img img { transform: scale(1.015); }
 .monogram { font-family: var(--font-serif); font-style: italic; font-weight: 400; font-size: 48px; color: #c4c2be; }
 .card-body { padding: 12px 10px 8px; display: grid; gap: 2px; min-width: 0; }
+.card-open { justify-self: start; margin-top: 8px; }
 .card-title { font-weight: 500; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { position: absolute; left: 10px; top: 10px; font-size: 12px; line-height: 1; padding: 6px 10px; border-radius: 999px; background: var(--accent); color: var(--ink); font-weight: 500; }
 /* a card and its ⋯ menu sit side by side in a shell, so the menu never opens the card */

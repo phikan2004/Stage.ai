@@ -194,7 +194,6 @@ function Overview({
 
 function ProjectPage({ project, data, shows, reload }: { project: MatterSummary; data: HomeData; shows: Show[] | null; reload: () => void }) {
   const [renaming, setRenaming] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
   const decks = data.decks.filter((d) => d.matterId === project.id);
   const demos = (shows ?? []).filter((s) => s.matterId === project.id);
   const counts = [plural(decks.length, "deck"), ...(shows ? [plural(demos.length, "demo")] : [])].join(" · ");
@@ -207,7 +206,6 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
 
   const actions = useItemActions(reload);
 
-  const toggle = (id: string) => setOpen(open === id ? null : id);
   return (
     <>
       <div className="page-head">
@@ -233,20 +231,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
           <h2 className="display">Decks</h2>
         </div>
         {decks.length ? (
-          <div className="rows">
+          <div className="cards library">
             {decks.map((d) => (
-              <Row
-                key={d.id}
-                open={open === d.id}
-                onToggle={() => toggle(d.id)}
-                thumb={d.hasThumb ? <img src={api.thumbUrl(d.id)} alt="" /> : null}
-                title={deckTitle(d.name)}
-                detail={`${plural(d.slideCount, "slide")} · ${plural(d.regionCount, "region")}${d.analyzed ? "" : " · needs analysis"}`}
-                href={`#/d/${d.id}`}
-                menu={actions.menu({ kind: "deck", deck: d, solo: false })}
-              >
-                {d.hasThumb && <img className="row-preview" src={api.thumbUrl(d.id)} alt="" />}
-              </Row>
+              <DeckCard key={d.id} deck={d} projectName={null} showOpen menu={actions.menu({ kind: "deck", deck: d, solo: false })} />
             ))}
           </div>
         ) : (
@@ -263,26 +250,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
         {!shows ? (
           <div className="empty-row">Demos aren't available here yet.</div>
         ) : demos.length ? (
-          <div className="rows">
+          <div className="cards library">
             {demos.map((s) => (
-              <Row
-                key={s.id}
-                open={open === s.id}
-                onToggle={() => toggle(s.id)}
-                thumb={<Cover show={s} />}
-                title={s.name}
-                detail={`${s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}${s.dryRuns.length ? ` · ${plural(s.dryRuns.length, "dry run")}` : ""}`}
-                href={`#/s/${s.id}`}
-                menu={actions.menu({ kind: "demo", show: s, solo: false })}
-              >
-                {s.beats.length > 0 && (
-                  <ol className="row-beats">
-                    {s.beats.map((b) => (
-                      <li key={b.id}>{b.label}</li>
-                    ))}
-                  </ol>
-                )}
-              </Row>
+              <DemoCard key={s.id} show={s} projectName={null} showOpen menu={actions.menu({ kind: "demo", show: s, solo: false })} />
             ))}
           </div>
         ) : (
@@ -326,55 +296,6 @@ function StartCard({ kind, hint }: { kind: NewKind; hint: string }) {
   );
 }
 
-/** One item in a project: click to see more, then open it. */
-function Row({
-  open,
-  onToggle,
-  thumb,
-  title,
-  detail,
-  href,
-  menu,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  thumb: ReactNode;
-  title: string;
-  detail: string;
-  href: string;
-  menu?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className={`row ${open ? "open" : ""}`}>
-      <div className="row-line">
-        <button className="row-head" aria-expanded={open} onClick={onToggle}>
-          <span className="row-thumb">{thumb}</span>
-          <span className="row-text">
-            <span className="card-title">{title}</span>
-            <span className="hint">{detail}</span>
-          </span>
-          <span className="row-chevron" aria-hidden="true">
-            ›
-          </span>
-        </button>
-        {menu}
-      </div>
-      {open && (
-        <div className="row-body">
-          {children}
-          <div className="row-actions">
-            <a className="btn small primary" href={href}>
-              Open
-            </a>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demos: Show[]; menu: ReactNode }) {
   // Its newest deck's first slide, else its newest demo's screenshot.
   const cover = p.thumbDeckId ? undefined : demos.find((s) => coverUrl(s));
@@ -398,7 +319,7 @@ function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demo
   );
 }
 
-function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectName: string | null; menu: ReactNode }) {
+function DeckCard({ deck: d, projectName, showOpen = false, menu }: { deck: DeckSummary; projectName: string | null; showOpen?: boolean; menu: ReactNode }) {
   return (
     <CardShell menu={menu}>
       <a className="card" href={`#/d/${d.id}`}>
@@ -412,6 +333,7 @@ function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectNa
             {projectName && `${projectName} · `}
             {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")} · {relTime(d.updatedAt)}
           </div>
+          {showOpen && <span className="btn small primary card-open">Open</span>}
         </div>
       </a>
     </CardShell>
@@ -447,7 +369,7 @@ function BeatDots({ show: s }: { show: Show }) {
   );
 }
 
-function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: string | null; menu: ReactNode }) {
+function DemoCard({ show: s, projectName, showOpen = false, menu }: { show: Show; projectName: string | null; showOpen?: boolean; menu: ReactNode }) {
   return (
     <CardShell menu={menu}>
       <a className="card" href={`#/s/${s.id}`}>
@@ -462,6 +384,7 @@ function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: str
             {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
             {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`} · {relTime(s.updatedAt)}
           </div>
+          {showOpen && <span className="btn small primary card-open">Open</span>}
         </div>
       </a>
     </CardShell>
