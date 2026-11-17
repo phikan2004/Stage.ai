@@ -59,9 +59,10 @@ Every run improves the next one, with no action needed:
 
 ## Chat
 
-In the deck editor, the **Chat** button in the bottom-left corner opens a chat above it. Say how the cues should
-work, in plain words, and Claude, looking at the slide on screen, makes the edits. Esc or the arrow hides it again and
-keeps the conversation; a dot on the button means a reply came while it was hidden.
+In the deck editor, the **Chat** button at the bottom left of the slide slides a chat in on the right, and the slide
+makes room so the slide list stays in view. Say how the cues should work, in plain words, and Claude, looking at the
+slide on screen, makes the edits. Esc or × slides it away and keeps the conversation; a dot on the button means a
+reply came while it was hidden.
 
 - add a cue on something it can see ("spotlight the 61% box"), with its own trigger words
 - change a cue's type, label, box ("make it bigger", "move it over the legend") or order ("fire it last")

@@ -22,8 +22,8 @@ const WELCOME =
 
 /**
  * A chat in the slide editor: say how the cues should work, and Claude, looking at the slide, makes the edits. It waits
- * as a button in the bottom-left corner and opens into a chat above it. Closing only hides it, so the conversation
- * and any answer on its way are kept.
+ * as a button in the bottom-left of the slide area and slides in as a panel on the right. Closing only slides it away,
+ * so the conversation and any answer on its way are kept.
  */
 export default function CueChat({ deckId, deck, index, slides, onRegions }: Props) {
   const [open, setOpen] = useState(false);
@@ -111,37 +111,32 @@ export default function CueChat({ deckId, deck, index, slides, onRegions }: Prop
 
   const count = deck.slides[index]?.regions.length ?? 0;
   return (
-    <div className={`cue-chat ${open ? "open" : ""}`}>
-      <div className="cue-chat-panel" hidden={!open}>
-        <RehearsalChat
-          title="Chat"
-          status={thinking ? "Looking at the slide…" : `Slide ${index + 1} · ${plural(count, "cue")}`}
-          messages={messages}
-          thinking={thinking}
-          onSend={send}
-          inputRef={input}
-          onEscape={() => setOpen(false)}
-          placeholder="e.g. Spotlight the 61% box when I talk about margin"
-          actions={
-            <button className="cue-chat-close" aria-label="Hide chat" onClick={() => setOpen(false)}>
-              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          }
-        />
+    <>
+      {/* The editor's third column: it slides in from the right and the slide makes room, so the slide list stays in view. */}
+      <div className={`cue-chat-dock ${open ? "open" : ""}`} inert={!open}>
+        <div className="cue-chat-dock-inner">
+          <RehearsalChat
+            title="Chat"
+            status={thinking ? "Looking at the slide…" : `Slide ${index + 1} · ${plural(count, "cue")}`}
+            messages={messages}
+            thinking={thinking}
+            onSend={send}
+            inputRef={input}
+            onEscape={() => setOpen(false)}
+            placeholder="e.g. Spotlight the 61% box when I talk about margin"
+            actions={
+              <button className="cue-chat-close" aria-label="Hide chat" title="Hide chat (Esc)" onClick={() => setOpen(false)}>
+                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                  <path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+            }
+          />
+        </div>
       </div>
-      <button
-        className="cue-chat-launcher"
-        aria-expanded={open}
-        aria-label={open ? "Hide chat" : "Open chat"}
-        title="Tell Claude how the cues on this slide should work"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-          {open ? (
-            <path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          ) : (
+      {!open && (
+        <button className="cue-chat-launcher" aria-label="Open chat" title="Tell Claude how the cues on this slide should work" onClick={() => setOpen(true)}>
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
             <path
               d="M4 4.5h12a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3H4A1.5 1.5 0 0 1 2.5 13V6A1.5 1.5 0 0 1 4 4.5z"
               fill="none"
@@ -149,12 +144,12 @@ export default function CueChat({ deckId, deck, index, slides, onRegions }: Prop
               strokeWidth="1.6"
               strokeLinejoin="round"
             />
-          )}
-        </svg>
-        {!open && <span>Chat</span>}
-        {unread && !open && <i className="cue-chat-dot" aria-label="New reply" />}
-        {thinking && !open && <i className="cue-chat-busy" aria-hidden="true" />}
-      </button>
-    </div>
+          </svg>
+          <span>Chat</span>
+          {unread && <i className="cue-chat-dot" aria-label="New reply" />}
+          {thinking && <i className="cue-chat-busy" aria-hidden="true" />}
+        </button>
+      )}
+    </>
   );
 }

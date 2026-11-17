@@ -730,10 +730,23 @@ input[type="checkbox"]:checked::after { transform: translateX(12px); }
 .robot-voice input[type="range"] { width: 100%; accent-color: var(--indigo); }
 .robot-voice select.field { padding: 5px 10px; font-size: 13px; }
 .rehearse-script .robot-voice { max-width: 520px; margin: 4px 0 12px; }
-/* the cue chat: a button in the editor's bottom-left corner that opens into a chat above it */
-.cue-chat { position: fixed; left: 20px; bottom: 20px; z-index: 30; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+/* the chat: a button in the slide area's bottom-left corner; it slides in as a panel on the right of the editor */
+.review { transition: grid-template-columns 0.32s var(--ease); grid-template-columns: 168px minmax(0, 1fr) 0px; }
+.review:has(.cue-chat-dock.open) { grid-template-columns: 168px minmax(0, 1fr) 380px; }
+.cue-chat-dock { min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid transparent; transition: border-color 0.32s var(--ease); }
+.cue-chat-dock.open { border-left-color: var(--rule); }
+/* a fixed width inside, so it slides in rather than squashing */
+.cue-chat-dock-inner { width: 380px; height: 100%; }
+.cue-chat-dock .rehearse-chat { height: 100%; }
+.cue-chat-dock .rehearse-chat-head { flex-direction: row; align-items: center; justify-content: space-between; }
+.cue-chat-close { border: 0; background: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; }
+.cue-chat-close:hover { background: var(--sand); }
 .cue-chat-launcher {
-  position: relative;
+  position: fixed;
+  /* just right of the slide list, so it never covers a thumbnail */
+  left: calc(168px + 20px);
+  bottom: 20px;
+  z-index: 30;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -751,30 +764,14 @@ input[type="checkbox"]:checked::after { transform: translateX(12px); }
 }
 .cue-chat-launcher:hover { background: var(--indigo-2); transform: translateY(-1px); box-shadow: 0 10px 28px rgba(57, 81, 208, 0.4), 0 1px 2px rgba(0, 0, 0, 0.1); }
 .cue-chat-launcher:active { transform: scale(0.97); }
-.cue-chat.open .cue-chat-launcher { width: 48px; padding: 0; justify-content: center; }
 .cue-chat-dot { position: absolute; top: 6px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--sage); box-shadow: 0 0 0 2px var(--indigo); }
 .cue-chat-busy { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: cue-chat-spin 0.8s linear infinite; }
 @keyframes cue-chat-spin { to { transform: rotate(360deg); } }
-.cue-chat-panel {
-  width: 380px;
-  height: min(560px, calc(100vh - 140px));
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--paper);
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 24px 60px rgba(13, 18, 48, 0.22);
-  transform-origin: bottom left;
-  animation: cue-chat-in 0.22s var(--ease);
-}
-.cue-chat-panel[hidden] { display: none; }
-.cue-chat-panel .rehearse-chat { height: 100%; border: 0; }
-.cue-chat-panel .rehearse-chat-head { flex-direction: row; align-items: center; justify-content: space-between; }
-.cue-chat-close { border: 0; background: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; }
-.cue-chat-close:hover { background: var(--sand); }
-@keyframes cue-chat-in { from { opacity: 0; transform: translateY(8px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) {
-  .cue-chat-panel, .cue-chat-busy { animation: none; }
+  .review, .cue-chat-dock { transition: none; }
+  .cue-chat-busy { animation: none; }
 }
-@media (max-width: 600px) {
-  .cue-chat { left: 12px; bottom: 12px; right: 12px; }
-  .cue-chat-panel { width: 100%; }
+@media (max-width: 900px) {
+  .review:has(.cue-chat-dock.open) { grid-template-columns: 168px minmax(0, 1fr) min(320px, 60vw); }
+  .cue-chat-dock-inner { width: min(320px, 60vw); }
 }
