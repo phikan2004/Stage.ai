@@ -32,7 +32,14 @@ export class UploadMissingError extends Error {
   }
 }
 
-/** prepareUpload was called for a one-presentation matter that already has its presentation. */
+/** A deck or demo was moved to a project that doesn't exist. */
+export class MatterNotFoundError extends Error {
+  constructor() {
+    super("That project no longer exists.");
+  }
+}
+
+/** A deck was added or moved to a one-presentation matter that already has its presentation. */
 export class MatterFullError extends Error {
   constructor() {
     super("This matter holds one presentation. Delete it to add a different one.");
@@ -306,6 +313,13 @@ export class FileStore implements Library {
   async patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null> {
     const d = this.db.decks.find((x) => x.id === id);
     if (!d) return null;
+    if (patch.matterId !== undefined && patch.matterId !== d.matterId) {
+      this.checkTarget(patch.matterId, true);
+      const from = d.matterId;
+      d.matterId = patch.matterId;
+      for (const r of this.db.runs) if (r.deckId === id) r.matterId = patch.matterId;
+      this.dropIfEmptySolo(from);
+    }
     if (patch.name !== undefined) d.name = patch.name;
     if (patch.slides !== undefined) d.slides = patch.slides;
     if (patch.analyzed !== undefined) d.analyzed = patch.analyzed;
@@ -314,6 +328,21 @@ export class FileStore implements Library {
     this.touchMatter(d.matterId, d.updatedAt);
     await this.save();
     return d;
+  }
+
+  /** Throws if the project can't take a deck (or a demo) right now. */
+  private checkTarget(matterId: string, isDeck: boolean) {
+    const m = this.db.matters.find((x) => x.id === matterId);
+    if (!m) throw new MatterNotFoundError();
+    if (isDeck && m.deckMode === "single" && this.db.decks.some((d) => d.matterId === matterId)) throw new MatterFullError();
+  }
+
+  /** A hidden solo matter that no longer holds anything goes away with its last item. */
+  private dropIfEmptySolo(matterId: string) {
+    const m = this.db.matters.find((x) => x.id === matterId);
+    if (!m?.solo) return;
+    if (this.db.decks.some((d) => d.matterId === matterId) || this.db.shows.some((x) => x.matterId === matterId)) return;
+    this.db.matters = this.db.matters.filter((x) => x.id !== matterId);
   }
 
   async setThumb(id: string, jpeg: Buffer): Promise<boolean> {
@@ -418,7 +447,14 @@ export class FileStore implements Library {
   async patchShow(id: string, patch: ShowPatch): Promise<Show | null> {
     const show = this.db.shows.find((x) => x.id === id);
     if (!show) return null;
-    Object.assign(show, patch, { updatedAt: Date.now() });
+    if (patch.matterId !== undefined && patch.matterId !== show.matterId) {
+      this.checkTarget(patch.matterId, false);
+      const from = show.matterId;
+      show.matterId = patch.matterId;
+      this.dropIfEmptySolo(from);
+    }
+    const { matterId: _moved, ...fields } = patch;
+    Object.assign(show, fields, { updatedAt: Date.now() });
     this.touchMatter(show.matterId, show.updatedAt);
     await this.save();
     return show;

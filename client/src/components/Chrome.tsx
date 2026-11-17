@@ -6,15 +6,16 @@ export interface Crumb {
   to?: string;
 }
 
-export type Tab = "projects" | "decks" | "demos";
+export type Tab = "home" | "projects" | "decks" | "demos";
 
 const TABS: [Tab, string, string][] = [
+  ["home", "Home", "#/"],
   ["projects", "Projects", "#/projects"],
-  ["decks", "Decks", "#/"],
+  ["decks", "Decks", "#/decks"],
   ["demos", "Demos", "#/demos"],
 ];
 
-/** The brand and where you are, then the Projects, Decks and Demos tabs. */
+/** The brand and where you are, then the Home, Projects, Decks and Demos tabs. */
 export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?: string; crumbs?: Crumb[]; children?: ReactNode }) {
   const tabsRef = useThumb<HTMLElement>('[aria-current="page"]', tab);
   return (

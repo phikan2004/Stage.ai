@@ -1,7 +1,7 @@
 import express, { type Response } from "express";
 import { z } from "zod";
 import { DeckCreateSchema, DeckModeSchema, DeckPatchSchema, DeckUploadRequestSchema, MatterSchema, RunInputSchema, ShowPatchSchema } from "../../shared/schema.ts";
-import { MatterFullError, UploadMissingError, type Library } from "./store.ts";
+import { MatterFullError, MatterNotFoundError, UploadMissingError, type Library } from "./store.ts";
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const NameBody = z.object({ name: MatterSchema.shape.name });
@@ -91,9 +91,14 @@ export function libraryRouter(store: Library, onRunSaved?: (runId: string) => vo
   r.patch("/decks/:id", async (req, res) => {
     const body = DeckPatchSchema.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    const d = await store.patchDeck(req.params.id, body.data);
-    if (!d) return void notFound(res, "Presentation");
-    res.json(d);
+    try {
+      const d = await store.patchDeck(req.params.id, body.data);
+      if (!d) return void notFound(res, "Presentation");
+      res.json(d);
+    } catch (e) {
+      if (!(e instanceof MatterFullError || e instanceof MatterNotFoundError)) throw e;
+      res.status(e instanceof MatterFullError ? 409 : 404).json({ error: e.message });
+    }
   });
 
   r.get("/decks/:id/usage", async (req, res) => {
@@ -176,9 +181,14 @@ export function libraryRouter(store: Library, onRunSaved?: (runId: string) => vo
   r.patch("/shows/:id", async (req, res) => {
     const body = ShowPatchSchema.safeParse(req.body);
     if (!body.success) return void badRequest(res, body.error);
-    const show = await store.patchShow(req.params.id, body.data);
-    if (!show) return void notFound(res, "Show");
-    res.json(show);
+    try {
+      const show = await store.patchShow(req.params.id, body.data);
+      if (!show) return void notFound(res, "Show");
+      res.json(show);
+    } catch (e) {
+      if (!(e instanceof MatterFullError || e instanceof MatterNotFoundError)) throw e;
+      res.status(e instanceof MatterFullError ? 409 : 404).json({ error: e.message });
+    }
   });
 
   r.delete("/shows/:id", async (req, res) => {

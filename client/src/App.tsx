@@ -7,7 +7,8 @@ import { useRoute } from "./lib/router";
 
 export default function App() {
   const [kind, id] = useRoute();
-  if (!kind) return <LibraryView tab="decks" />;
+  if (!kind) return <LibraryView tab="home" />;
+  if (kind === "decks") return <LibraryView tab="decks" />;
   if (kind === "demos") return <LibraryView tab="demos" />;
   if (kind === "projects") return <LibraryView tab="projects" />;
   if (kind === "m" && id) return <LibraryView tab="projects" projectId={id} />;

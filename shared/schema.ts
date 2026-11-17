@@ -207,6 +207,8 @@ export interface DeckUpload {
 
 export const DeckPatchSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
+  /** Moves the deck into another project (or a solo matter). */
+  matterId: z.string().min(1).optional(),
   slides: z.array(SlideSchema).optional(),
   analyzed: z.boolean().optional(),
   plan: DeckPlanSchema.optional(),
@@ -350,7 +352,9 @@ export const ShowSchema = z.object({
 });
 export type Show = z.infer<typeof ShowSchema>;
 
-export const ShowPatchSchema = ShowSchema.pick({ name: true, beats: true, limits: true, recordingId: true, cover: true, dryRuns: true }).partial();
+export const ShowPatchSchema = ShowSchema.pick({ name: true, beats: true, limits: true, recordingId: true, cover: true, dryRuns: true })
+  .partial()
+  .extend({ matterId: z.string().min(1).optional() }); // moves the demo into another project
 export type ShowPatch = z.infer<typeof ShowPatchSchema>;
 
 /** Passed dry runs out of all that reached this beat. */
