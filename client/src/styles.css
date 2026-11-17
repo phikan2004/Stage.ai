@@ -178,6 +178,16 @@ a.btn { text-decoration: none; color: var(--ink); }
 .section.first { margin-top: 8px; }
 .section-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 20px; border-bottom: 1px solid var(--rule); padding-bottom: 14px; flex-wrap: wrap; }
 .section-head h2 { font-size: 32px; margin: 0; }
+.section-head .spacer { flex: 1; }
+.section-link { font-size: 14px; color: var(--muted); text-decoration: none; }
+.section-link:hover { color: var(--ink); }
+/* home: three ways to start, then what you touched last */
+.home-starts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.home-start { display: grid; gap: 4px; justify-items: start; text-align: left; padding: 20px; border: 0; border-radius: var(--radius); background: var(--sand); color: inherit; font: inherit; cursor: pointer; transition: background 0.2s, transform 0.2s var(--ease); }
+.home-start:hover { background: var(--sand-2); }
+.home-start:active { transform: scale(0.99); }
+.home-start .card-title { white-space: normal; }
+.home-start-glyph { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 10px; border-radius: 12px; background: var(--card); box-shadow: var(--ring); color: var(--indigo); font-size: 18px; }
 .section-head + .timeline, .section-head + .empty-row { border-top: 0; }
 .intro-line { margin: 10px 0 0; max-width: 460px; color: var(--ink-2); font-size: 17px; line-height: 1.6; }
 .library-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 24px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
@@ -277,6 +287,12 @@ a.btn { text-decoration: none; color: var(--ink); }
 .dialog-text { margin: -6px 0 0; color: var(--ink-2); }
 .dialog label { display: grid; gap: 6px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dropzone { display: grid; justify-items: center; gap: 4px; padding: 28px 16px; border: 1.5px dashed var(--rule-strong); border-radius: 16px; background: var(--paper); color: inherit; font: inherit; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--indigo); }
+.dropzone.over { border-color: var(--indigo); background: var(--indigo-soft); }
+.dropzone.has-file { border-style: solid; border-color: var(--rule); background: var(--sand); }
+.dropzone-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 6px; border-radius: 50%; background: var(--card); box-shadow: var(--ring); color: var(--indigo); font-size: 16px; }
+.dropzone-title { font-weight: 500; font-size: 14px; overflow-wrap: anywhere; }
 
 /* ---------- deck page ---------- */
 .deck-page { height: 100%; display: flex; flex-direction: column; }
@@ -648,6 +664,7 @@ input[type="checkbox"]:checked::after { transform: translateX(12px); }
 }
 .page > .banner + .banner { margin-top: 8px; }
 .page > .banner + .section.first { margin-top: 32px; }
+.nowrap { white-space: nowrap; }
 
 /* ---------- robot rehearsal ---------- */
 .rehearse-layout {

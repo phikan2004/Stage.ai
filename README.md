@@ -29,8 +29,9 @@ whole flow without calling the vision model.
 
 ## Projects, decks, demos and runs
 
-- The top bar has three tabs: **Projects** (`#/projects`), **Decks** (`#/`) and **Demos** (`#/demos`). Each can be
-  sorted and searched.
+- The top bar has four tabs. **Home** (`#/`) has quick ways to start a deck, demo or project, your most recently
+  edited decks and demos, and your latest projects. **Projects** (`#/projects`), **Decks** (`#/decks`) and **Demos**
+  (`#/demos`) list everything and can be sorted and searched.
 - **New** adds a project, a deck (PowerPoint or PDF, several at once) or a demo. A deck or demo goes into a project or
   stands on its own.
 - A **project** (`#/m/<id>`) lists its decks and demos as rows. Click one to see more, then open it. In the code and

@@ -30,7 +30,7 @@ import {
   type UsageEntry,
   type UsageSummary,
 } from "../../shared/schema.ts";
-import { MatterFullError, UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
+import { MatterFullError, MatterNotFoundError, UploadMissingError, type DeckFileSource, type Library } from "./store.ts";
 
 /** Where deck files and thumbnails go. Supabase Storage in production; swappable for tests. */
 export interface BlobStore {
@@ -467,16 +467,40 @@ export class SupabaseStore implements Library {
     }
   }
 
+  /** Throws if the project can't take a deck (or a demo) right now. */
+  private async checkTarget(tx: postgres.TransactionSql, matterId: string, isDeck: boolean) {
+    if (!isId(matterId)) throw new MatterNotFoundError();
+    const [t] = await tx<{ deck_mode: string; decks: number }[]>`
+      select m.deck_mode, (select count(*) from producer.decks d where d.matter_id = m.id)::int as decks
+      from producer.matters m where m.id = ${matterId}`;
+    if (!t) throw new MatterNotFoundError();
+    if (isDeck && t.deck_mode === "single" && t.decks > 0) throw new MatterFullError();
+  }
+
+  /** A hidden solo matter that no longer holds anything goes away with its last item. */
+  private async dropIfEmptySolo(tx: postgres.TransactionSql, matterId: string) {
+    await tx`
+      delete from producer.matters m where m.id = ${matterId} and m.solo
+        and not exists (select 1 from producer.decks d where d.matter_id = m.id)
+        and not exists (select 1 from producer.shows s where s.matter_id = m.id)`;
+  }
+
   async patchDeck(id: string, patch: DeckPatch): Promise<DeckRecord | null> {
     if (!isId(id)) return null;
     return this.sql.begin(async (tx) => {
+      const [before] = await tx<{ matter_id: string }[]>`select matter_id from producer.decks where id = ${id}`;
+      if (!before) return null;
+      const moving = patch.matterId !== undefined && patch.matterId !== before.matter_id;
+      if (moving) await this.checkTarget(tx, patch.matterId!, true);
       const [d] = await tx<DeckRow[]>`
         update producer.decks set
+          matter_id = ${moving ? patch.matterId! : before.matter_id}::uuid,
           name = coalesce(${patch.name ?? null}, name),
           analyzed = coalesce(${patch.analyzed ?? null}, analyzed),
           plan = coalesce(${patch.plan ? tx.json(patch.plan) : null}::jsonb, plan)
         where id = ${id} returning *`;
       if (!d) return null;
+      if (moving) await this.dropIfEmptySolo(tx, before.matter_id);
       if (patch.slides) {
         // Replace the deck's regions wholesale; small (tens of rows) and keeps ordering exact.
         await tx`delete from producer.regions where deck_id = ${id}`;
@@ -622,16 +646,25 @@ export class SupabaseStore implements Library {
   async patchShow(id: string, patch: ShowPatch): Promise<Show | null> {
     if (!isId(id)) return null;
     const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
-    const [r] = await this.sql<ShowRow[]>`
-      update producer.shows set
-        name = coalesce(${patch.name ?? null}, name),
-        beats = coalesce(${json(patch.beats)}::jsonb, beats),
-        limits = coalesce(${json(patch.limits)}::jsonb, limits),
-        recording_id = coalesce(${patch.recordingId ?? null}, recording_id),
-        cover = coalesce(${patch.cover ?? null}, cover),
-        dry_runs = coalesce(${json(patch.dryRuns)}::jsonb, dry_runs)
-      where id = ${id} returning *`;
-    return r ? toShow(r) : null;
+    return this.sql.begin(async (tx) => {
+      const [before] = await tx<{ matter_id: string }[]>`select matter_id from producer.shows where id = ${id}`;
+      if (!before) return null;
+      const moving = patch.matterId !== undefined && patch.matterId !== before.matter_id;
+      if (moving) await this.checkTarget(tx, patch.matterId!, false);
+      const [r] = await tx<ShowRow[]>`
+        update producer.shows set
+          matter_id = ${moving ? patch.matterId! : before.matter_id}::uuid,
+          name = coalesce(${patch.name ?? null}, name),
+          beats = coalesce(${json(patch.beats)}::jsonb, beats),
+          limits = coalesce(${json(patch.limits)}::jsonb, limits),
+          recording_id = coalesce(${patch.recordingId ?? null}, recording_id),
+          cover = coalesce(${patch.cover ?? null}, cover),
+          dry_runs = coalesce(${json(patch.dryRuns)}::jsonb, dry_runs)
+        where id = ${id} returning *`;
+      if (!r) return null;
+      if (moving) await this.dropIfEmptySolo(tx, before.matter_id);
+      return toShow(r);
+    });
   }
 
   async deleteShow(id: string): Promise<boolean> {
