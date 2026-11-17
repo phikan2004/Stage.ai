@@ -20,7 +20,7 @@ export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?:
   return (
     <header className="topbar">
       <a className="brand" href="#/">
-        Stage<span className="brand-dot">.</span>
+        Stage
       </a>
       {back && <BackButton to={back} />}
       {crumbs.length > 0 && (
