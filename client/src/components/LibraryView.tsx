@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { DeckSummary, HomeData, MatterSummary, Show } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
-import { deckTitle, plural } from "../lib/format";
+import { deckTitle, plural, relTime } from "../lib/format";
 import { back as goBack, go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
 import { ConfirmDialog, Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
@@ -314,7 +314,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
 /** Shown where nothing exists yet; opens the same flow as New, into the open project if there is one. */
 function StartCard({ kind, hint }: { kind: NewKind; hint: string }) {
   return (
-    <button className="card project-card card-start" onClick={() => startNew(kind)}>
+    <button className={`card ${kind === "project" ? "project-card " : ""}card-start`} onClick={() => startNew(kind)}>
       <div className="card-img">
         <span className="plus">+</span>
       </div>
@@ -384,12 +384,13 @@ function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demo
         <div className="card-img">
           {p.thumbDeckId && <img src={api.thumbUrl(p.thumbDeckId, p.updatedAt)} alt="" />}
           {cover && <Cover show={cover} />}
+          {!p.thumbDeckId && !cover && <Monogram name={p.name} />}
           <span className="badge quiet">Project</span>
         </div>
         <div className="card-body">
           <div className="card-title">{p.name}</div>
           <div className="hint">
-            {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")}
+            {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")} · {relTime(p.updatedAt)}
           </div>
         </div>
       </a>
@@ -409,7 +410,7 @@ function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectNa
           <div className="card-title">{deckTitle(d.name)}</div>
           <div className="hint">
             {projectName && `${projectName} · `}
-            {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")}
+            {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")} · {relTime(d.updatedAt)}
           </div>
         </div>
       </a>
@@ -417,14 +418,23 @@ function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectNa
   );
 }
 
-/** A demo's cover screenshot; nothing when the runner can't serve it, so the card stays plain. */
+/** A demo's cover screenshot; its initial when the runner can't serve one, so the card never looks empty. */
 function Cover({ show }: { show: Show }) {
   const [failed, setFailed] = useState(false);
   const url = coverUrl(show);
-  return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : null;
+  return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : <Monogram name={show.name} />;
 }
 
-/** One dot per cue: green if the last dry run got through it, coral if not, hollow if never tried. */
+/** A name's first letter, standing in for a picture. */
+function Monogram({ name }: { name: string }) {
+  return (
+    <span className="monogram" aria-hidden="true">
+      {name.trim().charAt(0).toUpperCase() || "·"}
+    </span>
+  );
+}
+
+/** One dot per cue: green if the last dry run got through it, amber if not, hollow if never tried. */
 function BeatDots({ show: s }: { show: Show }) {
   const last = s.dryRuns.at(-1);
   return (
@@ -450,7 +460,7 @@ function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: str
           <div className="hint">
             {projectName && `${projectName} · `}
             {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
-            {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`}
+            {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`} · {relTime(s.updatedAt)}
           </div>
         </div>
       </a>
