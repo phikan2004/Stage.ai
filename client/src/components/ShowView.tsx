@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { beatScore, MAX_DRY_RUNS, type Beat, type DryRun, type Matter, type Show, type ShowLimits, type ShowPatch } from "../../../shared/schema";
+import { beatScore, MAX_BEAT_CUES, MAX_DRY_RUNS, MAX_LESSONS, type Beat, type DryRun, type Matter, type Show, type ShowLimits, type ShowPatch } from "../../../shared/schema";
 import { CueDirector, type CueBeat, type FlowState } from "../engine/cues";
 import { api } from "../lib/api";
 import { plural } from "../lib/format";
@@ -43,6 +43,8 @@ export default function ShowView({ id }: { id: string }) {
   const [heard, setHeard] = useState("");
   const [nextCue, setNextCue] = useState<CueBeat | null>(null);
   const [flow, setFlow] = useState<FlowState>("listening");
+  /** what the last dry run taught the demo, once the runner has worked it out */
+  const [learned, setLearned] = useState<string | null>(null);
   const speech = useRef<SpeechSource | null>(null);
   const director = useRef<CueDirector | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -102,6 +104,21 @@ export default function ShowView({ id }: { id: string }) {
       const line = describeEvent(msg.event);
       if (line) setLog((l) => [...l.slice(-MAX_LOG + 1), line]);
     }
+    if (msg.type === "improved" && msg.showId === showRef.current?.id) {
+      const improvements = msg.improvements as { id: string; cues: string[]; lesson: string | null }[];
+      const beats = showRef.current!.beats.map((b) => {
+        const imp = improvements.find((i) => i.id === b.id);
+        if (!imp) return b;
+        const known = new Set(b.cues.map((c) => c.toLowerCase()));
+        const cues = [...b.cues, ...imp.cues.filter((c) => !known.has(c.toLowerCase()))].slice(0, MAX_BEAT_CUES);
+        const lessons = imp.lesson ? [...(b.lessons ?? []), imp.lesson].slice(-MAX_LESSONS) : b.lessons;
+        return { ...b, cues, ...(lessons ? { lessons } : {}) };
+      });
+      change({ beats });
+      const cues = improvements.reduce((n, i) => n + i.cues.length, 0);
+      const lessons = improvements.filter((i) => i.lesson).length;
+      setLearned([cues && plural(cues, "new trigger phrase"), lessons && plural(lessons, "lesson")].filter(Boolean).join(" and "));
+    }
     if (msg.type === "dry-run:done") {
       setWaiting(false);
       setActiveBeat(null);
@@ -152,9 +169,12 @@ export default function ShowView({ id }: { id: string }) {
     const beats = showRef.current?.beats ?? [];
     director.current = new CueDirector(beats);
     setNextCue(director.current.next);
+    setLearned(null);
     await listen((r) => {
       director.current?.hear(r.text, r.isFinal, r.timestamp);
       if (r.text.trim()) setHeard(r.text.trim());
+      // What was said goes to the runner too, so the run can teach the demo the presenter's own words.
+      if (r.isFinal && r.text.trim()) stage.send({ type: "said", text: r.text.trim(), t: Date.now() });
     }, [...new Set(beats.flatMap((b) => b.cues))].slice(0, MAX_KEYTERMS));
     stage.send({ type: "dry-run", show: showRef.current });
   };
@@ -306,6 +326,7 @@ export default function ShowView({ id }: { id: string }) {
                     : `Stopped: ${lastRun.results.at(-1)?.summary ?? "no cues ran."}`}
                 </div>
               )}
+              {learned && <div className="banner">Learned from this run: {learned}. You'll find them in the cues below.</div>}
             </section>
 
             <section className="section">
@@ -333,12 +354,27 @@ export default function ShowView({ id }: { id: string }) {
                       </label>
                       <label className="stage-field">
                         <span className="hint">Trigger words, one per line</span>
-                        <textarea className="field" defaultValue={b.cues.join("\n")} onBlur={(e) => editBeat(b, { cues: lines(e.target.value) })} />
+                        <textarea className="field" key={b.cues.join("\n")} defaultValue={b.cues.join("\n")} onBlur={(e) => editBeat(b, { cues: lines(e.target.value) })} />
                       </label>
                       <label className="stage-field">
                         <span className="hint">Notes for the AI</span>
                         <textarea className="field" value={b.notes} placeholder="Use the Acme account, not the test one" onChange={(e) => editBeat(b, { notes: e.target.value })} />
                       </label>
+                      {(b.lessons?.length ?? 0) > 0 && (
+                        <div className="stage-field">
+                          <span className="hint">Learned from dry runs</span>
+                          <ul className="stage-lessons">
+                            {b.lessons!.map((l, n) => (
+                              <li key={n}>
+                                <span>{l}</span>
+                                <button className="linkish" aria-label="Forget this lesson" onClick={() => editBeat(b, { lessons: b.lessons!.filter((_, k) => k !== n) })}>
+                                  Forget
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       {show.recordingId && b.landmarks.length > 0 && connected && (
                         <div className="stage-frames">
                           {b.landmarks.map((f) => {

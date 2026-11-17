@@ -43,6 +43,20 @@ whole flow without calling the vision model.
   app right now, but runs are still saved and each one's page still works at `#/r/<id>`.
 - Region edits autosave as you work. The top bar shows Saving…/Saved.
 
+## Learning from runs (logs expire)
+
+Every run improves the next one, with no action needed:
+
+- **Decks:** when a run is saved, the server reads what you said on each slide and adds phrases you actually used to
+  that slide's regions, so later runs zoom on your own wording.
+- **Demos:** after each dry run, the runner saves a log on this Mac with what you said before each cue, whether the AI
+  finished it, and its moves. It then reads that run with the demo's other recent runs and adds new trigger phrases
+  (only words you really said) and, for cues that failed or needed a second try, a short lesson the AI reads on its
+  next run. Lessons show under each cue as "Learned from dry runs", and Forget removes one. Your own notes are never
+  changed.
+- **Expiry:** run logs aren't kept long term. Deck runs (with their transcripts) and dry-run logs are deleted 15 days
+  after they happen. Set `LOG_RETENTION_DAYS` to change that. What was learned stays in the deck or demo.
+
 ## Stage (in progress)
 
 Stage is an AI operator for live software demos: you talk, and it performs the demo on your Mac. It always acts live

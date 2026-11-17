@@ -287,8 +287,23 @@ export const BeatSchema = z.object({
   landmarks: z.array(z.string()),
   /** corrections from dry runs */
   notes: z.string(),
+  /** what Stage taught itself from its own dry runs; separate from the presenter's notes so it never overwrites them */
+  lessons: z.array(z.string()).max(8).optional(),
 });
+/** Learning adds trigger phrases up to this many per beat, and keeps this many of its newest lessons. */
+export const MAX_BEAT_CUES = 12;
+export const MAX_LESSONS = 5;
 export type Beat = z.infer<typeof BeatSchema>;
+
+/**
+ * Run logs (deck run transcripts, dry-run traces) are only kept this long. They're read for learning right after each
+ * run and across recent runs, then expire. LOG_RETENTION_DAYS in the environment overrides it.
+ */
+export const LOG_RETENTION_DAYS = 15;
+export const logRetentionMs = (env: Record<string, string | undefined> = {}) => {
+  const days = Number(env.LOG_RETENTION_DAYS);
+  return (Number.isFinite(days) && days > 0 ? days : LOG_RETENTION_DAYS) * 24 * 60 * 60 * 1000;
+};
 
 /** What the operator may touch in this show. */
 export const ShowLimitsSchema = z.object({

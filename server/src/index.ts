@@ -2,7 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
-import { CueSchema, DeckPlanRequestSchema, SlideFactsSchema } from "../../shared/schema.ts";
+import { CueSchema, DeckPlanRequestSchema, logRetentionMs, SlideFactsSchema } from "../../shared/schema.ts";
 import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, learnFromRun, model, planDeck, type UsageSink } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
 import { FileStore, type Library } from "./store.ts";
@@ -28,14 +28,24 @@ async function openLibrary(): Promise<Library> {
 }
 const store = await openLibrary();
 
+/** Run logs are for learning, not an archive: each is read right after it's saved, then expires. */
+const expireRuns = () =>
+  store
+    .expireRuns(Date.now() - logRetentionMs(process.env))
+    .then((n) => n && console.log(`expired ${n} run log${n === 1 ? "" : "s"}`))
+    .catch((e) => console.error(`run expiry failed: ${e instanceof Error ? e.message : e}`));
+void expireRuns();
+
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 app.use(
   "/api",
   libraryRouter(store, (runId) => {
-    learnFromRun(runId, store).catch((e) =>
-      console.error(`learn: run ${runId} failed: ${e instanceof Error ? e.message : e}`),
-    );
+    learnFromRun(runId, store)
+      .catch((e) => console.error(`learn: run ${runId} failed: ${e instanceof Error ? e.message : e}`))
+      // Expire after learning, so this run's own transcript is always read first. Runs on every save, so
+      // it also works on hosts with no long-lived process.
+      .finally(expireRuns);
   }),
 );
 
