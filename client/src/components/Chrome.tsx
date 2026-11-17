@@ -20,13 +20,9 @@ export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?:
   return (
     <header className="topbar">
       <a className="brand" href="#/">
-        Stage<span className="brand-dot">.</span>
+        Stage
       </a>
-      {back && (
-        <button className="back" onClick={() => goBack(back)}>
-          <span aria-hidden="true">←</span> Back
-        </button>
-      )}
+      {back && <BackButton to={back} />}
       {crumbs.length > 0 && (
         <nav className="crumbs">
           {crumbs.map((c, i) => (
@@ -46,6 +42,15 @@ export function TopBar({ tab, back, crumbs = [], children }: { tab?: Tab; back?:
       </nav>
       {children}
     </header>
+  );
+}
+
+/** Returns to the previous page, or to `to` when this page was opened directly. */
+export function BackButton({ to }: { to: string }) {
+  return (
+    <button className="back" onClick={() => goBack(to)}>
+      <span aria-hidden="true">←</span> Back
+    </button>
   );
 }
 

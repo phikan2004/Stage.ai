@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import type { DeckSummary, HomeData, MatterSummary, Show } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
-import { deckTitle, plural } from "../lib/format";
-import { go } from "../lib/router";
+import { deckTitle, plural, relTime } from "../lib/format";
+import { back as goBack, go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
 import { ConfirmDialog, Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
 
@@ -79,7 +79,7 @@ export default function LibraryView({ tab, projectId }: { tab: Tab; projectId?: 
 
   return (
     <>
-      <TopBar tab={tab} back={projectId ? "/projects" : undefined}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
+      <TopBar tab={tab}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
       <main className="page">
         {error && <div className="banner err">{error}</div>}
         {!data && !error && <Loading />}
@@ -136,6 +136,7 @@ function Overview({
 
   const intro = INTRO[tab];
   const what = tab === "projects" ? "projects" : tab === "decks" ? "decks" : "demos";
+  const kind: NewKind = tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo";
   return (
     <>
       <div className="page-head">
@@ -161,6 +162,7 @@ function Overview({
         <div className="empty-row">Demos aren't available here yet.</div>
       ) : shown.length ? (
         <div className="cards library">
+          {!q && <StartCard kind={kind} hint={`Add another ${kind}.`} />}
           {shown.map((e) =>
             e.kind === "project" ? (
               <ProjectCard
@@ -180,7 +182,7 @@ function Overview({
         <div className="empty-row">Nothing matches “{query.trim()}”.</div>
       ) : (
         <div className="cards library">
-          <StartCard kind={tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo"} hint={`You don't have any ${what} yet.`} />
+          <StartCard kind={kind} hint={`You don't have any ${what} yet.`} />
         </div>
       )}
 
@@ -192,7 +194,6 @@ function Overview({
 
 function ProjectPage({ project, data, shows, reload }: { project: MatterSummary; data: HomeData; shows: Show[] | null; reload: () => void }) {
   const [renaming, setRenaming] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
   const decks = data.decks.filter((d) => d.matterId === project.id);
   const demos = (shows ?? []).filter((s) => s.matterId === project.id);
   const counts = [plural(decks.length, "deck"), ...(shows ? [plural(demos.length, "demo")] : [])].join(" · ");
@@ -205,7 +206,6 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
 
   const actions = useItemActions(reload);
 
-  const toggle = (id: string) => setOpen(open === id ? null : id);
   return (
     <>
       <div className="page-head">
@@ -214,6 +214,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
           <h1 className="display">{project.name}</h1>
         </div>
         <div className="page-actions">
+          <button className="btn small ghost" onClick={() => goBack("/projects")}>
+            ← Back
+          </button>
           <button className="btn small ghost" onClick={() => setRenaming(true)}>
             Rename
           </button>
@@ -228,20 +231,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
           <h2 className="display">Decks</h2>
         </div>
         {decks.length ? (
-          <div className="rows">
+          <div className="cards library">
             {decks.map((d) => (
-              <Row
-                key={d.id}
-                open={open === d.id}
-                onToggle={() => toggle(d.id)}
-                thumb={d.hasThumb ? <img src={api.thumbUrl(d.id)} alt="" /> : null}
-                title={deckTitle(d.name)}
-                detail={`${plural(d.slideCount, "slide")} · ${plural(d.regionCount, "region")}${d.analyzed ? "" : " · needs analysis"}`}
-                href={`#/d/${d.id}`}
-                menu={actions.menu({ kind: "deck", deck: d, solo: false })}
-              >
-                {d.hasThumb && <img className="row-preview" src={api.thumbUrl(d.id)} alt="" />}
-              </Row>
+              <DeckCard key={d.id} deck={d} projectName={null} showOpen menu={actions.menu({ kind: "deck", deck: d, solo: false })} />
             ))}
           </div>
         ) : (
@@ -258,26 +250,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
         {!shows ? (
           <div className="empty-row">Demos aren't available here yet.</div>
         ) : demos.length ? (
-          <div className="rows">
+          <div className="cards library">
             {demos.map((s) => (
-              <Row
-                key={s.id}
-                open={open === s.id}
-                onToggle={() => toggle(s.id)}
-                thumb={<Cover show={s} />}
-                title={s.name}
-                detail={`${s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}${s.dryRuns.length ? ` · ${plural(s.dryRuns.length, "dry run")}` : ""}`}
-                href={`#/s/${s.id}`}
-                menu={actions.menu({ kind: "demo", show: s, solo: false })}
-              >
-                {s.beats.length > 0 && (
-                  <ol className="row-beats">
-                    {s.beats.map((b) => (
-                      <li key={b.id}>{b.label}</li>
-                    ))}
-                  </ol>
-                )}
-              </Row>
+              <DemoCard key={s.id} show={s} projectName={null} showOpen menu={actions.menu({ kind: "demo", show: s, solo: false })} />
             ))}
           </div>
         ) : (
@@ -309,7 +284,7 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
 /** Shown where nothing exists yet; opens the same flow as New, into the open project if there is one. */
 function StartCard({ kind, hint }: { kind: NewKind; hint: string }) {
   return (
-    <button className="card project-card card-start" onClick={() => startNew(kind)}>
+    <button className={`card ${kind === "project" ? "project-card " : ""}card-start`} onClick={() => startNew(kind)}>
       <div className="card-img">
         <span className="plus">+</span>
       </div>
@@ -318,55 +293,6 @@ function StartCard({ kind, hint }: { kind: NewKind; hint: string }) {
         <div className="hint">{hint}</div>
       </div>
     </button>
-  );
-}
-
-/** One item in a project: click to see more, then open it. */
-function Row({
-  open,
-  onToggle,
-  thumb,
-  title,
-  detail,
-  href,
-  menu,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  thumb: ReactNode;
-  title: string;
-  detail: string;
-  href: string;
-  menu?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className={`row ${open ? "open" : ""}`}>
-      <div className="row-line">
-        <button className="row-head" aria-expanded={open} onClick={onToggle}>
-          <span className="row-thumb">{thumb}</span>
-          <span className="row-text">
-            <span className="card-title">{title}</span>
-            <span className="hint">{detail}</span>
-          </span>
-          <span className="row-chevron" aria-hidden="true">
-            ›
-          </span>
-        </button>
-        {menu}
-      </div>
-      {open && (
-        <div className="row-body">
-          {children}
-          <div className="row-actions">
-            <a className="btn small primary" href={href}>
-              Open
-            </a>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -379,12 +305,13 @@ function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demo
         <div className="card-img">
           {p.thumbDeckId && <img src={api.thumbUrl(p.thumbDeckId, p.updatedAt)} alt="" />}
           {cover && <Cover show={cover} />}
+          {!p.thumbDeckId && !cover && <Monogram name={p.name} />}
           <span className="badge quiet">Project</span>
         </div>
         <div className="card-body">
           <div className="card-title">{p.name}</div>
           <div className="hint">
-            {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")}
+            {plural(p.deckCount, "deck")} · {plural(demos.length, "demo")} · {relTime(p.updatedAt)}
           </div>
         </div>
       </a>
@@ -392,7 +319,7 @@ function ProjectCard({ project: p, demos, menu }: { project: MatterSummary; demo
   );
 }
 
-function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectName: string | null; menu: ReactNode }) {
+function DeckCard({ deck: d, projectName, showOpen = false, menu }: { deck: DeckSummary; projectName: string | null; showOpen?: boolean; menu: ReactNode }) {
   return (
     <CardShell menu={menu}>
       <a className="card" href={`#/d/${d.id}`}>
@@ -404,22 +331,32 @@ function DeckCard({ deck: d, projectName, menu }: { deck: DeckSummary; projectNa
           <div className="card-title">{deckTitle(d.name)}</div>
           <div className="hint">
             {projectName && `${projectName} · `}
-            {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")}
+            {plural(d.slideCount, "slide")} · {plural(d.regionCount, "region")} · {relTime(d.updatedAt)}
           </div>
+          {showOpen && <span className="btn small primary card-open">Open</span>}
         </div>
       </a>
     </CardShell>
   );
 }
 
-/** A demo's cover screenshot; nothing when the runner can't serve it, so the card stays plain. */
+/** A demo's cover screenshot; its initial when the runner can't serve one, so the card never looks empty. */
 function Cover({ show }: { show: Show }) {
   const [failed, setFailed] = useState(false);
   const url = coverUrl(show);
-  return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : null;
+  return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : <Monogram name={show.name} />;
 }
 
-/** One dot per cue: green if the last dry run got through it, orange if not, hollow if never tried. */
+/** A name's first letter, standing in for a picture. */
+function Monogram({ name }: { name: string }) {
+  return (
+    <span className="monogram" aria-hidden="true">
+      {name.trim().charAt(0).toUpperCase() || "·"}
+    </span>
+  );
+}
+
+/** One dot per cue: green if the last dry run got through it, amber if not, hollow if never tried. */
 function BeatDots({ show: s }: { show: Show }) {
   const last = s.dryRuns.at(-1);
   return (
@@ -432,7 +369,7 @@ function BeatDots({ show: s }: { show: Show }) {
   );
 }
 
-function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: string | null; menu: ReactNode }) {
+function DemoCard({ show: s, projectName, showOpen = false, menu }: { show: Show; projectName: string | null; showOpen?: boolean; menu: ReactNode }) {
   return (
     <CardShell menu={menu}>
       <a className="card" href={`#/s/${s.id}`}>
@@ -445,8 +382,9 @@ function DemoCard({ show: s, projectName, menu }: { show: Show; projectName: str
           <div className="hint">
             {projectName && `${projectName} · `}
             {s.beats.length ? plural(s.beats.length, "cue") : "Not taught yet"}
-            {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`}
+            {s.dryRuns.length > 0 && ` · ${plural(s.dryRuns.length, "dry run")}`} · {relTime(s.updatedAt)}
           </div>
+          {showOpen && <span className="btn small primary card-open">Open</span>}
         </div>
       </a>
     </CardShell>

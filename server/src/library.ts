@@ -12,7 +12,7 @@ const badRequest = (res: Response, error: z.ZodError) =>
   res.status(400).json({ error: error.issues[0]?.message ?? "Invalid request" });
 
 /** /api routes for matters, decks (file + regions + thumbnail) and presentation runs. */
-export function libraryRouter(store: Library) {
+export function libraryRouter(store: Library, onRunSaved?: (runId: string) => void) {
   const r = express.Router();
 
   r.get("/home", async (_req, res) => {
@@ -133,6 +133,7 @@ export function libraryRouter(store: Library) {
     if (!run) return void notFound(res, "Presentation");
     console.log(`saved run ${run.id}: ${Math.round(run.stats.durationMs / 1000)}s, ${run.stats.zooms} zooms`);
     res.status(201).json({ id: run.id });
+    onRunSaved?.(run.id);
   });
 
   r.get("/runs/:id", async (req, res) => {

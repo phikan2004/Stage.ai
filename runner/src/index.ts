@@ -217,6 +217,7 @@ async function serve(helper: Helper) {
       await helper.onHotkey((name) => session?.hotkey(name));
       problem = null;
       session.status();
+      void session.expireLogs();
       console.log(`Stage runner ready, audience display: ${display.name}.`);
     } catch (e) {
       session = null;

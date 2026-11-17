@@ -7,7 +7,7 @@ import { go } from "../lib/router";
 import { Loading, TopBar } from "./Chrome";
 
 type Item =
-  | { kind: "zoom"; t: number; label: string; verb: string }
+  | { kind: "zoom"; t: number; label: string; verb: string; score?: number; latencyMs?: number }
   | { kind: "command"; t: number; text: string }
   | { kind: "said"; t: number; text: string; simulated: boolean };
 
@@ -29,7 +29,7 @@ function segments(events: RunEvent[], total: number): Segment[] {
       out.push(seg);
       if (e.type === "slide") continue;
     }
-    if (e.type === "zoom") seg.items.push({ kind: "zoom", t: e.t, label: e.label, verb: CUE_PAST_TENSE[e.cue ?? "zoom"] });
+    if (e.type === "zoom") seg.items.push({ kind: "zoom", t: e.t, label: e.label, verb: CUE_PAST_TENSE[e.cue ?? "zoom"], score: e.score, latencyMs: e.latencyMs });
     else if (e.type === "command") seg.items.push({ kind: "command", t: e.t, text: e.text });
     else if (e.type === "heard") {
       const prev = seg.items.at(-1);
@@ -41,7 +41,67 @@ function segments(events: RunEvent[], total: number): Segment[] {
   return out;
 }
 
-const ENGINES: Record<string, string> = { deepgram: "Deepgram", chrome: "Chrome speech" };
+interface LatencyStats {
+  avg: number;
+  min: number;
+  max: number;
+  count: number;
+}
+
+function latencyStats(events: RunEvent[]): LatencyStats | null {
+  const latencies = events.filter((e): e is Extract<RunEvent, { type: "zoom" }> & { latencyMs: number } =>
+    e.type === "zoom" && typeof e.latencyMs === "number",
+  ).map((e) => e.latencyMs);
+  if (!latencies.length) return null;
+  return {
+    count: latencies.length,
+    avg: Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length),
+    min: Math.min(...latencies),
+    max: Math.max(...latencies),
+  };
+}
+
+function exportLog(run: RunDetail, segs: Segment[]): void {
+  const lines: string[] = [
+    `Run log: ${deckTitle(run.deckName)}`,
+    `Date: ${new Date(run.startedAt).toLocaleString()}`,
+    `Duration: ${duration(run.stats.durationMs)}  ·  Engine: ${run.engine ?? "unknown"}`,
+    `Slides visited: ${run.stats.slidesVisited}  ·  Zooms: ${run.stats.zooms}  ·  Words heard: ${run.stats.words}`,
+    "",
+  ];
+
+  const stats = latencyStats(run.events);
+  if (stats) {
+    lines.push(`Zoom latency — avg: ${stats.avg}ms  min: ${stats.min}ms  max: ${stats.max}ms  (${stats.count} zooms)`);
+    lines.push("");
+  }
+
+  for (const seg of segs) {
+    lines.push(`── Slide ${seg.slide + 1}  [${clock(seg.start)} – ${clock(seg.end)}  ${duration(seg.end - seg.start)}]`);
+    for (const it of seg.items) {
+      if (it.kind === "said") {
+        lines.push(`  ${clock(it.t)}  HEARD${it.simulated ? " (sim)" : ""}  "${it.text}"`);
+      } else if (it.kind === "zoom") {
+        const latency = it.latencyMs != null ? `  +${it.latencyMs}ms` : "";
+        const score = it.score != null ? `  score=${it.score.toFixed(2)}` : "";
+        lines.push(`  ${clock(it.t)}  ZOOM  ${it.label}${latency}${score}`);
+      } else {
+        lines.push(`  ${clock(it.t)}  CMD  "${it.text}"`);
+      }
+    }
+    lines.push("");
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `stage-run-${new Date(run.startedAt).toISOString().slice(0, 19).replace(/[T:]/g, "-")}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const ENGINES: Record<string, string> = { deepgram: "Deepgram", chrome: "Chrome speech", robot: "Robot rehearsal" };
 
 export default function RunView({ id }: { id: string }) {
   const [run, setRun] = useState<RunDetail | null>(null);
@@ -55,6 +115,7 @@ export default function RunView({ id }: { id: string }) {
   }, [id]);
 
   const segs = useMemo(() => (run ? segments(run.events, run.stats.durationMs) : []), [run]);
+  const latency = useMemo(() => (run ? latencyStats(run.events) : null), [run]);
 
   const remove = async () => {
     if (!run || !confirm("Delete this run from the history?")) return;
@@ -90,6 +151,9 @@ export default function RunView({ id }: { id: string }) {
                     Open presentation
                   </a>
                 )}
+                <button className="btn small" onClick={() => exportLog(run, segs)}>
+                  Download log
+                </button>
                 <button className="btn small ghost danger" onClick={remove}>
                   Delete run
                 </button>
@@ -99,9 +163,14 @@ export default function RunView({ id }: { id: string }) {
             <div className="stats">
               <Stat label="Length" value={duration(run.stats.durationMs)} />
               <Stat label="Slides shown" value={`${run.stats.slidesVisited}`} sub={`of ${run.slideCount}`} />
-              <Stat label="Cues" value={`${run.stats.zooms}`} />
-              <Stat label="Voice commands" value={`${run.stats.commands}`} />
+              <Stat label="Zooms" value={`${run.stats.zooms}`} />
               <Stat label="Words heard" value={run.stats.words.toLocaleString()} />
+              {latency && (
+                <>
+                  <Stat label="Avg zoom latency" value={`${latency.avg}ms`} />
+                  <Stat label="Min / max latency" value={`${latency.min}ms`} sub={` / ${latency.max}ms`} />
+                </>
+              )}
             </div>
 
             <section className="section">
@@ -136,9 +205,15 @@ export default function RunView({ id }: { id: string }) {
                               {it.kind === "zoom" ? (
                                 <>
                                   {it.verb} <b>{it.label}</b>
+                                  {it.latencyMs != null && (
+                                    <span className="tl-latency"> +{it.latencyMs}ms</span>
+                                  )}
+                                  {it.score != null && (
+                                    <span className="hint"> score {it.score.toFixed(2)}</span>
+                                  )}
                                 </>
                               ) : (
-                                <>Voice command “{it.text}”</>
+                                <>Voice command "{it.text}"</>
                               )}
                             </div>
                           ),

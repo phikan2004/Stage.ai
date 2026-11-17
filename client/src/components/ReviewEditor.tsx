@@ -6,6 +6,8 @@ import { CUES } from "../lib/cues";
 import { placePopup } from "../lib/popupPosition";
 import { highlightMarks } from "../lib/textLines";
 import { useSuggestCues } from "../lib/useSuggestCues";
+import { plural } from "../lib/format";
+import CueChat from "./CueChat";
 
 interface Props {
   deckId: string;
@@ -15,6 +17,8 @@ interface Props {
   initialIndex: number;
   onRegions: (index: number, regions: Region[]) => void;
   onPresent: (from: number) => void;
+  /** a robot talks through the deck from here, and feedback in a chat tunes the cues */
+  onRehearse?: (from: number) => void;
 }
 
 type DragKind = "move" | "nw" | "ne" | "sw" | "se" | "draw";
@@ -55,7 +59,7 @@ function resize(kind: DragKind, o: Box, dx: number, dy: number): Box {
   return { x, y, w, h };
 }
 
-export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRegions, onPresent }: Props) {
+export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRegions, onPresent, onRehearse }: Props) {
   const [index, setIndex] = useState(Math.min(initialIndex, deck.images.length - 1));
   const [selected, setSelected] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState(false);
@@ -245,7 +249,8 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
           <button key={i} className={i === index ? "active" : ""} onClick={() => setIndex(i)}>
             <img src={img.url} alt={`Slide ${i + 1}`} />
             <span className="n">
-              {i + 1} · {deck.slides[i]?.regions.length ?? 0}
+              {i + 1}
+              {(deck.slides[i]?.regions.length ?? 0) > 0 && ` · ${plural(deck.slides[i].regions.length, "cue")}`}
             </span>
           </button>
         ))}
@@ -260,7 +265,12 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
             {progress ?? message ?? (regions.length ? "Drag on the slide to add a cue" : "Drag on the slide to add a cue, or have Claude suggest them")}
           </span>
           <div className="spacer" />
-          <button className="btn small accent" onClick={() => onPresent(index)}>
+          {onRehearse && (
+            <button className="btn small" onClick={() => onRehearse(index)} title="A robot presents from this slide while you watch and give feedback">
+              Rehearse with robot
+            </button>
+          )}
+          <button className="btn small primary" onClick={() => onPresent(index)}>
             Present ▶
           </button>
         </div>
@@ -334,6 +344,7 @@ export default function ReviewEditor({ deckId, deck, planned, initialIndex, onRe
           )}
         </div>
       </section>
+      <CueChat deckId={deckId} deck={deck} index={index} slides={slides} onRegions={onRegions} />
     </div>
   );
 }

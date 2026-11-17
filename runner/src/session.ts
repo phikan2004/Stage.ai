@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { type Beat, type BeatResult, type Show } from "../../shared/schema.ts";
-import { runBeat, type ContentParam } from "./agent.ts";
+import { dirname, join } from "node:path";
+import { logRetentionMs, type Beat, type BeatResult, type Show } from "../../shared/schema.ts";
+import { runBeat, type BeatEvent, type ContentParam } from "./agent.ts";
 import { CueGate } from "./cueGate.ts";
 import { DesktopDriver } from "./desktopDriver.ts";
 import type { Display, Helper } from "./helper.ts";
+import { expireLogs, improveShow, keepTrace, recentTraces, worthLearning, type BeatTrace, type DryRunTrace } from "./improve.ts";
 import { learn } from "./learn.ts";
 import { claudeModel } from "./model.ts";
 import { actionGapMs } from "./pace.ts";
@@ -24,7 +25,32 @@ export function showBrief(show: Show): string {
 }
 
 export function beatGoal(beat: Beat): string {
-  return `${beat.goal}\nDone when: ${beat.success}${beat.notes ? `\nThe presenter's corrections: ${beat.notes}` : ""}`;
+  const lessons = beat.lessons?.length ? `\nLearned from earlier dry runs: ${beat.lessons.join(" ")}` : "";
+  return `${beat.goal}\nDone when: ${beat.success}${beat.notes ? `\nThe presenter's corrections: ${beat.notes}` : ""}${lessons}`;
+}
+
+/** An operator move as one readable log line; null for the ones that carry nothing to learn from. */
+export function traceLine(e: BeatEvent): string | null {
+  if (e.type === "action") return `Did ${e.action}`;
+  if (e.type === "replanned") return `Replanned: ${e.reason}`;
+  if (e.type === "blocked") return `Blocked ${e.action}: ${e.reason}`;
+  return null;
+}
+
+/** What the presenter said before each beat's cue: everything after the previous beat's cue, up to this one's. */
+export function speechByBeat(beatIds: string[], said: { text: string; t: number }[], cuedAt: Map<string, number>, startedAt: number): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let from = startedAt;
+  for (const id of beatIds) {
+    const to = cuedAt.get(id);
+    if (to == null) {
+      out.set(id, []);
+      continue;
+    }
+    out.set(id, said.filter((s) => s.t >= from && s.t <= to).map((s) => s.text));
+    from = to;
+  }
+  return out;
 }
 
 /** What's going on between the console and this Mac: one recording or one dry run at a time. */
@@ -36,6 +62,8 @@ export class StageSession {
   private busy: "recording" | "learning" | "dry-run" | null = null;
   /** Each beat of the run waits here for the presenter. */
   private cues: CueGate | null = null;
+  /** What the presenter says during a dry run, kept for learning afterwards. */
+  private dryRunSaid: { text: string; t: number }[] | null = null;
 
   constructor(
     private helper: Helper,
@@ -87,6 +115,7 @@ export class StageSession {
       case "cue":
         return this.cues?.release(String(msg.beatId));
       case "said":
+        if (this.dryRunSaid) return void this.dryRunSaid.push({ text: String(msg.text), t: Number(msg.t) });
         return this.recorder?.said(String(msg.text), Number(msg.t));
       case "record:start":
         return void this.guarded(() => this.startRecording(String(msg.name)));
@@ -144,9 +173,16 @@ export class StageSession {
     const driver = new DesktopDriver(this.helper, this.display, stop.signal);
     const model = claudeModel({ brief: showBrief(show) });
     const results: BeatResult[] = [];
+    const startedAt = Date.now();
+    const cuedAt = new Map<string, number>();
+    const moves = new Map<string, string[]>();
+    this.dryRunSaid = [];
     // The screen starts black, and the operator gets its first move ready behind it. Nothing runs until the first cue.
     await this.curtain(true);
-    const cues = new CueGate(show.beats.map((b) => b.id), (beatId) => this.send({ type: "cued", beatId }));
+    const cues = new CueGate(show.beats.map((b) => b.id), (beatId) => {
+      cuedAt.set(beatId, Date.now());
+      this.send({ type: "cued", beatId });
+    });
     this.cues = cues;
     const begun = cues.released(show.beats[0]?.id).then(() => {
       this.send({ type: "begun" });
@@ -167,7 +203,11 @@ export class StageSession {
           release: i === 0 ? begun : cues.released(beat.id),
           signal: stop.signal,
           actionGapMs,
-          onEvent: (event) => this.send({ type: "agent", beatId: beat.id, event }),
+          onEvent: (event) => {
+            const line = traceLine(event);
+            if (line) moves.set(beat.id, [...(moves.get(beat.id) ?? []), line]);
+            this.send({ type: "agent", beatId: beat.id, event });
+          },
         });
         results.push({ beatId: beat.id, outcome: report.outcome, summary: report.summary, ms: report.totalMs, cueToActionMs: report.cueToActionMs });
         this.send({ type: "beat:done", beatId: beat.id, outcome: report.outcome });
@@ -179,6 +219,42 @@ export class StageSession {
       await this.curtain(false).catch(() => {});
       this.send({ type: "dry-run:done", run: { at: Date.now(), results } });
       this.setBusy(null);
+      const said = this.dryRunSaid ?? [];
+      this.dryRunSaid = null;
+      const heard = speechByBeat(show.beats.map((b) => b.id), said, cuedAt, startedAt);
+      const trace: DryRunTrace = {
+        showId: show.id,
+        at: startedAt,
+        beats: show.beats.map((b): BeatTrace => {
+          const r = results.find((x) => x.beatId === b.id);
+          return { beatId: b.id, said: heard.get(b.id) ?? [], cued: cuedAt.has(b.id), outcome: r?.outcome ?? null, summary: r?.summary ?? "", cueToActionMs: r?.cueToActionMs ?? null, events: moves.get(b.id) ?? [] };
+        }),
+      };
+      void this.learnFromDryRun(show, trace);
+    }
+  }
+
+  private get logsDir() {
+    return join(dirname(this.recordingsDir), "logs");
+  }
+
+  /** Clears logs past their retention; call once at startup. */
+  expireLogs() {
+    return expireLogs(this.logsDir, logRetentionMs(process.env)).catch(() => 0);
+  }
+
+  /**
+   * After every dry run: keep its log for a while, read it with the show's other recent runs, and send the console
+   * new trigger words and lessons to fold into the demo. In the background, so the next run never waits on it.
+   */
+  private async learnFromDryRun(show: Show, trace: DryRunTrace) {
+    try {
+      await keepTrace(this.logsDir, trace, logRetentionMs(process.env));
+      if (!worthLearning(trace)) return;
+      const improvements = await improveShow(show, await recentTraces(this.logsDir, show.id));
+      if (improvements.length) this.send({ type: "improved", showId: show.id, improvements });
+    } catch (e) {
+      console.error(`dry-run learning failed: ${e instanceof Error ? e.message : e}`);
     }
   }
 }

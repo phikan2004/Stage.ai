@@ -585,6 +585,12 @@ export class SupabaseStore implements Library {
     return r.count > 0;
   }
 
+  async expireRuns(before: number): Promise<number> {
+    // run_events go with their run (on delete cascade).
+    const r = await this.sql`delete from producer.runs where started_at < ${new Date(before)}`;
+    return r.count;
+  }
+
   /* ---------- shows ---------- */
 
   async shows(matterId: string): Promise<Show[] | null> {

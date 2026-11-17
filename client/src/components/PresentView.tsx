@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import type { DeckScript } from "../../../shared/rehearse";
 import { MAX_RUN_EVENTS, type Region, type RunEvent, type RunInput } from "../../../shared/schema";
 import type { Deck } from "../lib/deck";
 import { ZoomDirector } from "../engine/director";
@@ -11,6 +12,7 @@ import { ScriptedSpeechSource } from "../speech/ScriptedSpeechSource";
 import type { SpeechStatus } from "../speech/SpeechSource";
 import { DeepgramSpeechSource } from "../speech/DeepgramSpeechSource";
 import { WebSpeechSource } from "../speech/WebSpeechSource";
+import type { RobotSpeechSource } from "../speech/RobotSpeechSource";
 import { keytermsFor } from "../engine/keyterms";
 import { COMMAND_KEYTERMS, parseCommand, type Command } from "../engine/commands";
 import type { SpeechSource } from "../speech/SpeechSource";
@@ -24,7 +26,25 @@ interface Props {
   onExit: (index: number) => void;
   /** Called once when presenting ends (including tab close, with `unloading` set). */
   onRunEnd: (run: Omit<RunInput, "deckId">, unloading: boolean) => void;
+  /** A robot presents instead of the presenter: it speaks the script and moves the slides, and the mic stays off. */
+  rehearsal?: Rehearsal;
 }
+
+export interface Rehearsal {
+  robot: RobotSpeechSource;
+  script: DeckScript;
+  paused: boolean;
+  /** filled with this run's events as they happen, for feedback */
+  eventsRef: MutableRefObject<RunEvent[]>;
+  onSlide: (index: number) => void;
+  /** the robot finished the last slide */
+  onFinished: () => void;
+}
+
+/** After a slide change, a breath before the robot speaks. */
+const ROBOT_BEFORE_SLIDE_MS = 700;
+/** After its last line on a slide, how long the robot lets the cue sit before moving on. */
+const ROBOT_AFTER_SLIDE_MS = 2000;
 
 export interface Snapshot {
   scores: RegionScore[];
@@ -55,7 +75,8 @@ const now = () => performance.now();
 
 type EventInput = { [K in RunEvent["type"]]: Omit<Extract<RunEvent, { type: K }>, "t"> }[RunEvent["type"]];
 
-export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Props) {
+export default function PresentView({ deck, startIndex, onExit, onRunEnd, rehearsal }: Props) {
+  const robot = rehearsal?.robot ?? null;
   const [config, setConfig] = useConfig();
   const [index, setIndex] = useState(startIndex);
   const [zoomId, setZoomId] = useState<string | null>(null);
@@ -102,11 +123,13 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
 
   // Run history: what happened while presenting, saved when the presenter closes.
   const runLog = useRef({ startedAt: Date.now(), t0: now(), events: [] as RunEvent[] });
+  const lastHeardAt = useRef<number | null>(null);
   const record = useCallback((e: EventInput) => {
     const log = runLog.current;
     if (log.events.length < MAX_RUN_EVENTS) log.events.push({ ...e, t: Math.round(now() - log.t0) } as RunEvent);
+    if (e.type === "heard") lastHeardAt.current = now();
   }, []);
-  const engineRef = useRef<Engine | null>(null);
+  const engineRef = useRef<Engine | "robot" | null>(null);
   const onRunEndRef = useRef(onRunEnd);
   onRunEndRef.current = onRunEnd;
   useEffect(() => {
@@ -126,13 +149,15 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
   }, []);
 
   const apply = useCallback(
-    (a: Action) => {
+    (a: Action, scores?: RegionScore[]) => {
       if (a.type === "zoomTo") {
         setZoomId(a.regionId);
         setLastZoomId(a.regionId);
         const region = regionsRef.current.find((r) => r.id === a.regionId);
         if (region?.cue === "reveal") setRevealed((s) => new Set(s).add(`${indexRef.current}:${region.id}`));
-        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue });
+        const score = scores?.find((s) => s.id === a.regionId)?.score;
+        const latencyMs = lastHeardAt.current != null ? Math.round(now() - lastHeardAt.current) : undefined;
+        record({ type: "zoom", slide: indexRef.current, regionId: a.regionId, label: region?.label ?? a.regionId, cue: region?.cue, score, latencyMs });
       } else if (a.type === "zoomOut") {
         setZoomId(null);
       }
@@ -191,25 +216,33 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     setEngineState(e);
   }, []);
 
-  // Speech: real mic + the debug "simulate" box both feed the same director.
+  // Speech: real mic (or the robot, when rehearsing) + the debug "simulate" box both feed the same director.
   useEffect(() => {
-    if (!engine) return;
-    engineRef.current = engine;
-    const source: SpeechSource = engine === "deepgram" ? new DeepgramSpeechSource() : new WebSpeechSource();
+    if (!engine && !robot) return;
+    engineRef.current = robot ? "robot" : engine;
+    const source: SpeechSource = robot ?? (engine === "deepgram" ? new DeepgramSpeechSource() : new WebSpeechSource());
     speechSource.current = source;
     source.setKeyterms?.(keyterms(deck.slides[index]?.regions ?? []));
     const log = (line: string) => {
       const stamp = new Date().toLocaleTimeString([], { hour12: false });
       setSpeechLog((l) => [...l.slice(-11), `${stamp}  ${line}`]);
     };
-    log(`engine: ${engine === "deepgram" ? "Deepgram" : "Chrome built-in"}`);
+    log(`engine: ${robot ? "Robot rehearsal" : engine === "deepgram" ? "Deepgram" : "Chrome built-in"}`);
     const offs = [source, sim].map((src) =>
       src.onResult((r) => {
         director.current.hear(r.text, r.isFinal, r.timestamp);
         if (!r.isFinal) return;
+        // Record heard before ticking so lastHeardAt is set for latency tracking.
         const text = r.text.trim();
-        if (text) record({ type: "heard", slide: indexRef.current, text, ...(src === sim ? { simulated: true } : {}) });
-        commandRef.current(r.text, r.timestamp);
+        // The robot's words are simulated too, so learning never mistakes them for the presenter's.
+        if (text) record({ type: "heard", slide: indexRef.current, text, ...(src === sim || src === robot ? { simulated: true } : {}) });
+        // Don't wait for the next 100ms tick — score and act immediately on a final result.
+        if (autoRef.current) {
+          const result = director.current.tick(r.timestamp);
+          if (result.action.type !== "none") apply(result.action, result.scores);
+        }
+        // The robot moves slides itself; its words are never commands.
+        if (src !== robot) commandRef.current(r.text, r.timestamp);
       }),
     );
     offs.push(source.onStatus((status, detail) => setMic({ status, detail })));
@@ -223,7 +256,41 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
     };
     // index is read once for the initial keyterms; slide changes update them below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim, engine, record]);
+    // While rehearsing, the engine setting loading in mustn't restart the robot mid-sentence.
+  }, [sim, robot ? null : engine, record, robot]);
+
+  /* ---------- robot rehearsal ---------- */
+  const rehearsalRef = useRef(rehearsal);
+  rehearsalRef.current = rehearsal;
+  const paused = rehearsal?.paused ?? false;
+  useEffect(() => {
+    if (rehearsalRef.current) rehearsalRef.current.eventsRef.current = runLog.current.events;
+  }, []);
+  useEffect(() => {
+    rehearsalRef.current?.onSlide(index);
+  }, [index]);
+  // Each slide: speak its lines, let the last cue sit, then move on like a clicker would.
+  useEffect(() => {
+    if (!robot || paused) return;
+    const last = deck.images.length - 1;
+    const lines = rehearsalRef.current?.script.slides.find((s) => s.slide === index + 1)?.lines ?? [];
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    robot.cancel();
+    timer = setTimeout(async () => {
+      if (!(await robot.say(lines)) || !alive) return;
+      timer = setTimeout(() => {
+        if (!alive) return;
+        if (index >= last) rehearsalRef.current?.onFinished();
+        else setIndex(index + 1);
+      }, ROBOT_AFTER_SLIDE_MS);
+    }, ROBOT_BEFORE_SLIDE_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      robot.cancel();
+    };
+  }, [robot, paused, index, deck.images.length]);
 
   // Bias recognition toward the current slide's words.
   useEffect(() => {
@@ -239,7 +306,7 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
       let scores: RegionScore[];
       if (autoRef.current) {
         const r = d.tick(t);
-        apply(r.action);
+        apply(r.action, r.scores);
         scores = r.scores;
       } else {
         scores = d.scores(t);
@@ -366,8 +433,11 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
   const ease = `${config.transitionMs}ms cubic-bezier(.22,.61,.36,1)`;
   const pad = config.zoomPadding * 0.5;
 
-  const micLabel =
-    mic.status === "listening"
+  const micLabel = rehearsal
+    ? paused
+      ? "Robot paused"
+      : "Robot presenting"
+    : mic.status === "listening"
       ? "Listening"
       : mic.status === "restarting"
         ? "Reconnecting"
@@ -378,7 +448,7 @@ export default function PresentView({ deck, startIndex, onExit, onRunEnd }: Prop
             : "Mic off";
 
   return (
-    <div className={`present ${helpVisible || debug ? "" : "hide-cursor"}`} onMouseMove={() => setHelpVisible(true)}>
+    <div className={`present ${rehearsal ? "rehearsing" : helpVisible || debug ? "" : "hide-cursor"}`} onMouseMove={() => setHelpVisible(true)}>
       <div className="slide-frame" style={{ ["--aspect" as string]: `${image.width / image.height}` }}>
         <div className="slide-inner" style={{ transform: toCss(transform), transition: `transform ${ease}` }}>
           <img src={image.url} alt={`Slide ${index + 1}`} draggable={false} />

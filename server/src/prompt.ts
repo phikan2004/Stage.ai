@@ -13,9 +13,19 @@ For each region:
 - label: 2-5 word name
 - description: one sentence describing what it shows
 - keywords: 5 to 10 words or short phrases a presenter might SAY out loud when discussing it. Include spoken forms of numbers ("38 percent", "2.4 million"), synonyms, and the specific nouns visible in it. Avoid generic words that apply to every region on the slide.
+- phrases: 3 to 6 things the presenter would actually say when transitioning to or introducing this region, each 3 to 7 words. Use natural spoken language — these should sound like a real presenter, not like slide text. Include transitional lead-ins ("let's look at", "moving on to", "let me show you"), paraphrases that don't copy the slide's wording, and at least one that names the section or label (e.g. "let's look at the results"). These are what trigger the zoom without exact keyword matches.
 - box: tight bounding box as fractions of slide width and height: x, y = top-left corner, w, h = size, all between 0 and 1. Measure carefully against the image; include the region's own labels/values.`;
 
 /** Whole-deck pass: decide what deserves emphasis before anyone presents. */
+/** What each cue does and when it fits. Shared by the director and the rehearsal coach so they never disagree. */
+export const CUE_GUIDE = `    - "outline" draws a rectangle around it. This is the default.
+    - "spotlight" dims everything else. Use it when the item must stand out from a lot around it but the rest of the layout still matters.
+    - "zoom" enlarges it. Use it only on a busy slide, when the item is too small to read from the back of a room.
+    - "highlight" sweeps a marker over text. Use it for one specific sentence, bullet or table row.
+    - "callout" outlines it and shows a short label. Use it for something visual the slide doesn't name.
+    - "arrow" points at it. Use it for one exact spot, such as a point on a chart.
+    - "reveal" hides it until the presenter reaches it. Use it rarely, for a conclusion or number that loses its punch if the audience reads it early.`;
+
 export const DIRECTOR_PROMPT = `You are directing a live presentation. While the presenter talks, an app emphasizes parts of the current slide on its own. The presenter never touches it, so your plan decides everything the audience sees.
 
 You receive every slide in order. Read the whole deck first, then decide what each slide is for and what, if anything, deserves emphasis.
@@ -33,13 +43,7 @@ For each slide:
 - emphasis: the items to emphasize, in the order a presenter would naturally reach them, after first introducing the slide. Each has:
   - target: a concrete description of the item that someone could find on the slide, quoting its visible text or number
   - cue: how to emphasize it. Choose the lightest one that works:
-    - "outline" draws a rectangle around it. This is the default.
-    - "spotlight" dims everything else. Use it when the item must stand out from a lot around it but the rest of the layout still matters.
-    - "zoom" enlarges it. Use it only on a busy slide, when the item is too small to read from the back of a room.
-    - "highlight" sweeps a marker over text. Use it for one specific sentence, bullet or table row.
-    - "callout" outlines it and shows a short label. Use it for something visual the slide doesn't name.
-    - "arrow" points at it. Use it for one exact spot, such as a point on a chart.
-    - "reveal" hides it until the presenter reaches it. Use it rarely, for a conclusion or number that loses its punch if the audience reads it early.
+${CUE_GUIDE}
   - why: why it matters to the deck's argument
 
 Also give summary: two or three sentences on what the deck argues and who it is for.
@@ -107,6 +111,50 @@ export const REGION_SCHEMA = {
   },
 } as const;
 
+/**
+ * Text-only pass that runs after a presentation. Given what the presenter said on each slide and
+ * the regions that slide contains, extract natural phrases they actually used for each region.
+ * These are added to the region's trigger phrases so future runs zoom without exact keyword matches.
+ */
+export const LEARN_PROMPT = `You improve automated zoom detection for a presentation tool. As someone presents, the tool zooms into whichever part of the current slide they're discussing, matched by keywords and phrases. After each session you receive the transcript of what was said and the slide regions, and extract natural phrases the presenter used that signal they were discussing each region.
+
+Rules:
+- Only use words the presenter actually said — pull phrases verbatim from the transcript
+- Each phrase must be 3–7 words
+- Prefer natural transitions and paraphrases ("here's what we found", "our approach was") over restating slide text verbatim
+- Skip a region if the presenter didn't clearly discuss it; return an empty phrases array
+- Return 0 to 4 phrases per region`;
+
+export function learnPrompt(
+  regions: { id: string; label: string; keywords: string[] }[],
+  transcript: string,
+): string {
+  const list = regions
+    .map((r, i) => `${i + 1}. id="${r.id}" label="${r.label}" keywords: ${r.keywords.slice(0, 5).join(", ")}`)
+    .join("\n");
+  return `Slide regions:\n${list}\n\nTranscript of what the presenter said:\n"${transcript.slice(0, 2000)}"`;
+}
+
+export const LEARN_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["regions"],
+  properties: {
+    regions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "phrases"],
+        properties: {
+          id: { type: "string" },
+          phrases: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  },
+} as const;
+
 export const userPrompt = (retryError?: string) =>
   retryError
     ? `Your previous answer was invalid: ${retryError}\nReturn corrected JSON for this slide.`
@@ -156,12 +204,13 @@ export const RESPONSE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "label", "description", "keywords", "box"],
+        required: ["id", "label", "description", "keywords", "phrases", "box"],
         properties: {
           id: { type: "string" },
           label: { type: "string" },
           description: { type: "string" },
           keywords: { type: "array", items: { type: "string" } },
+          phrases: { type: "array", items: { type: "string" } },
           box: {
             type: "object",
             additionalProperties: false,

@@ -23,6 +23,9 @@ import {
   GUIDED_PROMPT,
   GUIDED_SCHEMA,
   guidedPrompt,
+  LEARN_PROMPT,
+  LEARN_SCHEMA,
+  learnPrompt,
   REGION_PROMPT,
   REGION_SCHEMA,
   regionPrompt,
@@ -30,6 +33,7 @@ import {
   SYSTEM_PROMPT,
   userPrompt,
 } from "./prompt.ts";
+import type { Library } from "./store.ts";
 
 export class AnalyzeError extends Error {
   constructor(
@@ -58,21 +62,22 @@ function parseDataUrl(url: string) {
   return { media_type: m[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: m[2] };
 }
 
-interface Call {
+export interface Call {
   system: string;
   schema: Record<string, unknown>;
   content: Anthropic.Beta.BetaContentBlockParam[];
   effort: Effort;
   maxTokens: number;
+  modelOverride?: string;
   usage: (u: TokenUsage & { model: string; effort: string; costUsd: number | null; durationMs: number }) => Promise<void>;
 }
 
-async function callModel(call: Call): Promise<unknown> {
+export async function callModel(call: Call): Promise<unknown> {
   const started = Date.now();
   // Streamed because a whole-deck plan at high effort can outlast a plain request's timeout.
   const res = await getClient()
     .beta.messages.stream({
-      model: model(),
+      model: call.modelOverride ?? model(),
       max_tokens: call.maxTokens,
       // On a safety decline, re-run on Anthropic's recommended fallback model instead of failing.
       betas: ["server-side-fallback-2026-07-01"],
@@ -101,14 +106,14 @@ async function callModel(call: Call): Promise<unknown> {
   return JSON.parse(text);
 }
 
-function requireKey() {
+export function requireKey() {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new AnalyzeError("ANTHROPIC_API_KEY is not set on the server. Add it to .env, or use the sample deck.", 503);
   }
 }
 
 /** Run an attempt, feeding a validation error back once. API errors aren't retried here. */
-async function withRetry<T>(what: string, attempt: (retryError?: string) => Promise<T>): Promise<T> {
+export async function withRetry<T>(what: string, attempt: (retryError?: string) => Promise<T>): Promise<T> {
   let lastError = "";
   for (let i = 0; i < 2; i++) {
     try {
@@ -124,7 +129,7 @@ async function withRetry<T>(what: string, attempt: (retryError?: string) => Prom
   throw new AnalyzeError(`Claude returned an invalid ${what} twice: ${lastError}`);
 }
 
-const imageBlock = (url: string): Anthropic.Beta.BetaContentBlockParam => ({
+export const imageBlock = (url: string): Anthropic.Beta.BetaContentBlockParam => ({
   type: "image",
   source: { type: "base64", ...parseDataUrl(url) },
 });
@@ -226,6 +231,97 @@ export interface SlideContext {
   /** what the file itself says about this slide, for PowerPoint decks */
   facts?: SlideFacts;
   onUsage: UsageSink;
+}
+
+const LEARN_MIN_WORDS = 15;
+const MAX_PHRASES = 12;
+
+const LearnResult = z.object({
+  regions: z.array(z.object({ id: z.string(), phrases: z.array(z.string()) })),
+});
+
+/**
+ * Post-run learning: maps the transcript from each slide to regions, extracts natural phrases the
+ * presenter used, and merges them into the deck's region phrases. Fire-and-forget — never throws.
+ * Each run makes the next one smarter without any user action.
+ */
+export async function learnFromRun(runId: string, store: Library): Promise<void> {
+  if (!process.env.ANTHROPIC_API_KEY) return;
+  const run = await store.run(runId);
+  if (!run) return;
+  const deck = await store.deck(run.deckId);
+  if (!deck) return;
+
+  const onUsage: UsageSink = async (entry) => {
+    store
+      .recordUsage({ ...entry, deckId: deck.id })
+      .catch((e) => console.error(`learn: usage write failed: ${e instanceof Error ? e.message : e}`));
+  };
+
+  // Accumulate heard (non-simulated) text per slide in order
+  const slideText = new Map<number, string[]>();
+  for (const event of run.events) {
+    if (event.type !== "heard" || event.simulated) continue;
+    const parts = slideText.get(event.slide) ?? [];
+    parts.push(event.text);
+    slideText.set(event.slide, parts);
+  }
+
+  const patchedSlides = deck.slides.map((s) => ({ ...s, regions: [...s.regions] }));
+  let changed = false;
+
+  for (const [slideIndex, parts] of slideText) {
+    const transcript = parts.join(" ");
+    if (transcript.split(/\s+/).filter(Boolean).length < LEARN_MIN_WORDS) continue;
+
+    const slide = deck.slides.find((s) => s.index === slideIndex);
+    if (!slide?.regions.length) continue;
+
+    const regionInput = slide.regions.map((r) => ({ id: r.id, label: r.label, keywords: r.keywords ?? [] }));
+
+    try {
+      const raw = await callModel({
+        system: LEARN_PROMPT,
+        schema: LEARN_SCHEMA,
+        content: [{ type: "text", text: learnPrompt(regionInput, transcript) }],
+        effort: "low" as Effort,
+        maxTokens: 1000,
+        modelOverride: "claude-haiku-5-5",
+        usage: (u) => onUsage({ ...u, kind: "region", slideIndex }),
+      });
+
+      const result = LearnResult.safeParse(raw);
+      if (!result.success) continue;
+
+      let slideChanged = false;
+      const patchIdx = patchedSlides.findIndex((s) => s.index === slideIndex);
+      if (patchIdx < 0) continue;
+
+      patchedSlides[patchIdx].regions = slide.regions.map((region) => {
+        const learned = result.data.regions.find((r) => r.id === region.id);
+        if (!learned?.phrases.length) return region;
+
+        const existingLower = new Set((region.phrases ?? []).map((p) => p.toLowerCase()));
+        const toAdd = learned.phrases.filter((p) => {
+          const t = p.trim();
+          return t.length >= 10 && t.split(/\s+/).length >= 3 && !existingLower.has(t.toLowerCase());
+        });
+        if (!toAdd.length) return region;
+
+        slideChanged = true;
+        return { ...region, phrases: [...(region.phrases ?? []), ...toAdd].slice(0, MAX_PHRASES) };
+      });
+
+      if (slideChanged) changed = true;
+    } catch (e) {
+      console.error(`learn: slide ${slideIndex} failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  if (changed) {
+    await store.patchDeck(deck.id, { slides: patchedSlides });
+    console.log(`learn: updated phrases for deck ${deck.id} from run ${runId}`);
+  }
 }
 
 /** Find a slide's regions; validate and retry once with the error fed back. */

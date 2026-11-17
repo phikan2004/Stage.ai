@@ -68,6 +68,8 @@ export interface Library {
   deleteDeck(id: string): Promise<boolean>;
   addRun(input: RunInput): Promise<Run | null>;
   deleteRun(id: string): Promise<boolean>;
+  /** Deletes runs (and their transcripts) that started before `before`; returns how many. */
+  expireRuns(before: number): Promise<number>;
   shows(matterId: string): Promise<Show[] | null>;
   allShows(): Promise<Show[]>;
   show(id: string): Promise<Show | null>;
@@ -377,6 +379,15 @@ export class FileStore implements Library {
     if (this.db.runs.length === before) return false;
     await this.save();
     return true;
+  }
+
+  async expireRuns(before: number): Promise<number> {
+    const kept = this.db.runs.filter((r) => r.startedAt >= before);
+    const gone = this.db.runs.length - kept.length;
+    if (!gone) return 0;
+    this.db.runs = kept;
+    await this.save();
+    return gone;
   }
 
   /* ---------- shows ---------- */

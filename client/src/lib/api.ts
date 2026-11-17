@@ -16,6 +16,7 @@ import type {
   ShowPatch,
   SlideFacts,
 } from "../../../shared/schema";
+import type { CueChatReply, CueChatRequest, DeckFeedbackReply, DeckFeedbackRequest, DeckScript, ShowFeedbackReply, ShowFeedbackRequest, ShowScript } from "../../../shared/rehearse";
 
 async function json<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
@@ -44,6 +45,8 @@ export const api = {
   createShow: (matterId: string, name: string) => fetch(`/api/matters/${matterId}/shows`, send("POST", { name })).then(json<Show>),
   show: (id: string) => fetch(`/api/shows/${id}`).then(json<Show>),
   patchShow: (id: string, patch: ShowPatch) => fetch(`/api/shows/${id}`, send("PATCH", patch)).then(json<Show>),
+  showScript: (id: string) => fetch(`/api/shows/${id}/rehearse/script`, send("POST", {})).then(json<ShowScript>),
+  showFeedback: (id: string, body: ShowFeedbackRequest) => fetch(`/api/shows/${id}/rehearse/feedback`, send("POST", body)).then(json<ShowFeedbackReply>),
   deleteShow: (id: string) => fetch(`/api/shows/${id}`, send("DELETE")).then(json<void>),
 
   createMatter: (name: string, solo = false) => fetch("/api/matters", send("POST", { name, solo })).then(json<Matter>),
@@ -66,6 +69,9 @@ export const api = {
     fetch(`/api/decks/${id}/plan`, send("POST", { images, facts }, { signal })).then(json<DeckPlan>),
   describeRegion: (deckId: string, slideIndex: number, label: string, cue: Cue, image: string, notes?: string) =>
     fetch("/api/analyze/region", send("POST", { image, label, cue, deckId, slideIndex, notes })).then(json<RegionDetails>),
+  cueChat: (id: string, body: CueChatRequest) => fetch(`/api/decks/${id}/cues/chat`, send("POST", body)).then(json<CueChatReply>),
+  deckScript: (id: string, notes?: string[]) => fetch(`/api/decks/${id}/rehearse/script`, send("POST", { notes })).then(json<DeckScript>),
+  deckFeedback: (id: string, body: DeckFeedbackRequest) => fetch(`/api/decks/${id}/rehearse/feedback`, send("POST", body)).then(json<DeckFeedbackReply>),
   deleteDeck: (id: string) => fetch(`/api/decks/${id}`, send("DELETE")).then(json<void>),
   deckFile: async (id: string) => {
     const res = await fetch(`/api/decks/${id}/file`);

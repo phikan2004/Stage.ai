@@ -43,6 +43,60 @@ whole flow without calling the vision model.
   app right now, but runs are still saved and each one's page still works at `#/r/<id>`.
 - Region edits autosave as you work. The top bar shows Saving…/Saved.
 
+## Learning from runs (logs expire)
+
+Every run improves the next one, with no action needed:
+
+- **Decks:** when a run is saved, the server reads what you said on each slide and adds phrases you actually used to
+  that slide's regions, so later runs zoom on your own wording.
+- **Demos:** after each dry run, the runner saves a log on this Mac with what you said before each cue, whether the AI
+  finished it, and its moves. It then reads that run with the demo's other recent runs and adds new trigger phrases
+  (only words you really said) and, for cues that failed or needed a second try, a short lesson the AI reads on its
+  next run. Lessons show under each cue as "Learned from dry runs", and Forget removes one. Your own notes are never
+  changed.
+- **Expiry:** run logs aren't kept long term. Deck runs (with their transcripts) and dry-run logs are deleted 15 days
+  after they happen. Set `LOG_RETENTION_DAYS` to change that. What was learned stays in the deck or demo.
+
+## Chat
+
+In the deck editor, the **Chat** button at the bottom left of the slide slides a chat in on the right, and the slide
+makes room so the slide list stays in view. Say how the cues should work, in plain words, and Claude, looking at the
+slide on screen, makes the edits. Esc or × slides it away and keeps the conversation; a dot on the button means a
+reply came while it was hidden.
+
+- add a cue on something it can see ("spotlight the 61% box"), with its own trigger words
+- change a cue's type, label, box ("make it bigger", "move it over the legend") or order ("fire it last")
+- make a cue fire earlier, later or less by mistake, by changing its trigger phrases and keywords
+- suggest better cues for a slide, with a short reason for each
+- apply the same change to other slides by name ("make every chart a spotlight")
+
+Edits save like your own, the latest can be undone, and Highlight cues work out their marker lines automatically. Each
+message is one Claude call with the slide image, recorded in usage as `region`.
+
+## Robot rehearsal
+
+Test a deck or demo without presenting it yourself. **Rehearse with robot** (next to Present on a deck, and next to
+Start dry run on a demo) has Claude write what a presenter would say, mostly in its own words rather than your cues'
+exact phrases, so it tests how well Stage follows real speech. You can edit any line first. The browser's voice speaks
+it aloud, each word goes straight to the cue engine as it's said, and your mic stays off.
+
+- **Decks:** the robot talks through each slide and moves on by itself. A chat sits beside the slides. Writing in it
+  pauses the robot, Claude turns your feedback into edits (trigger phrases, keywords, cue type, removing a cue, or the
+  robot's own lines), saves them, and runs again from the first slide they affect. Undo reverts the latest change.
+  Runs are saved with the engine "Robot rehearsal", and the robot's words are marked simulated, so learning ignores them.
+- **Demos:** the AI really performs each cue on the stage display while the robot talks. Feedback stops the run,
+  edits trigger words, notes for the AI, goals, "done when" or lessons, and starts again from the beginning. Limits
+  are never changed by feedback. The robot's words are never sent to the runner, so they can't become trigger words.
+
+- **Voice:** set speed, pitch and voice with the controls above the chat, or just ask ("slow down a bit", "use a
+  British voice and sound calmer"). The coach picks from the English voices your browser has. A new voice is heard from
+  the robot's next line, and this browser remembers it. A style that lives in the words, like "less jargon", rewrites
+  the robot's lines instead.
+- **Cue types:** ask for a different cue ("make the Q1 bar a spotlight") or for suggestions ("suggest better cues for
+  this slide"). The coach chooses using the same guide as the deck's director, applies them and says why.
+
+Each script and each piece of feedback is one Claude call, recorded in usage as `rehearse`.
+
 ## Stage (in progress)
 
 Stage is an AI operator for live software demos: you talk, and it performs the demo on your Mac. It always acts live
@@ -218,7 +272,7 @@ deck's total. Prices live in `shared/plans.ts`.
 |---|---|
 | `→` / `←` (also PageDown/PageUp, Space) | Next / previous slide (always zooms out) |
 | `Esc` | Zoom out now. Press again (when not zoomed) to leave full-screen, and again to return to the editor (this saves the run) |
-| `A` | Toggle automation (bottom-left dot: orange = auto) |
+| `A` | Toggle automation (bottom-left dot: beige = auto) |
 | `D` | Debug panel |
 | `F` | Toggle full-screen |
 

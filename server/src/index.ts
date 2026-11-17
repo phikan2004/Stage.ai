@@ -2,9 +2,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
-import { CueSchema, DeckPlanRequestSchema, SlideFactsSchema } from "../../shared/schema.ts";
-import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, model, planDeck, type UsageSink } from "./analyze.ts";
+import { CueSchema, DeckPlanRequestSchema, logRetentionMs, SlideFactsSchema } from "../../shared/schema.ts";
+import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, learnFromRun, model, planDeck, type UsageSink } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
+import { deckFeedback, deckScript, showFeedback, showScript } from "./rehearse.ts";
+import { CueChatRequestSchema, DeckFeedbackRequestSchema, DeckScriptRequestSchema, ShowFeedbackRequestSchema } from "../../shared/rehearse.ts";
+import { cueChat } from "./cueChat.ts";
 import { FileStore, type Library } from "./store.ts";
 import { SupabaseStore } from "./supabaseStore.ts";
 import { createSttSession, SttError } from "./stt.ts";
@@ -28,9 +31,26 @@ async function openLibrary(): Promise<Library> {
 }
 const store = await openLibrary();
 
+/** Run logs are for learning, not an archive: each is read right after it's saved, then expires. */
+const expireRuns = () =>
+  store
+    .expireRuns(Date.now() - logRetentionMs(process.env))
+    .then((n) => n && console.log(`expired ${n} run log${n === 1 ? "" : "s"}`))
+    .catch((e) => console.error(`run expiry failed: ${e instanceof Error ? e.message : e}`));
+void expireRuns();
+
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use("/api", libraryRouter(store));
+app.use(
+  "/api",
+  libraryRouter(store, (runId) => {
+    learnFromRun(runId, store)
+      .catch((e) => console.error(`learn: run ${runId} failed: ${e instanceof Error ? e.message : e}`))
+      // Expire after learning, so this run's own transcript is always read first. Runs on every save, so
+      // it also works on hosts with no long-lived process.
+      .finally(expireRuns);
+  }),
+);
 
 /** Logging what a call cost must never cost the user their analysis. */
 const recordUsage = (deckId: string | null): UsageSink => async (entry) => {
@@ -114,6 +134,69 @@ app.post("/api/decks/:id/plan", async (req, res) => {
     res.json(plan);
   } catch (e) {
     sendAnalyzeError(res, e, "plan");
+  }
+});
+
+/* ---------- cue chat: customize a slide's cues in plain words ---------- */
+
+app.post("/api/decks/:id/cues/chat", async (req, res) => {
+  const body = CueChatRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await cueChat(deck, body.data, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "chat");
+  }
+});
+
+/* ---------- robot rehearsal ---------- */
+
+app.post("/api/decks/:id/rehearse/script", async (req, res) => {
+  const body = DeckScriptRequestSchema.safeParse(req.body ?? {});
+  if (!body.success) return void res.status(400).json({ error: "Body must be { notes?: string[] }" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await deckScript(deck, body.data.notes, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal script");
+  }
+});
+
+app.post("/api/decks/:id/rehearse/feedback", async (req, res) => {
+  const body = DeckFeedbackRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await deckFeedback(deck, body.data, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal feedback");
+  }
+});
+
+app.post("/api/shows/:id/rehearse/script", async (req, res) => {
+  try {
+    const show = await store.show(req.params.id);
+    if (!show) return void res.status(404).json({ error: "Demo not found" });
+    if (!show.beats.length) return void res.status(409).json({ error: "Teach this demo before rehearsing it." });
+    res.json(await showScript(show, recordUsage(null)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal script");
+  }
+});
+
+app.post("/api/shows/:id/rehearse/feedback", async (req, res) => {
+  const body = ShowFeedbackRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const show = await store.show(req.params.id);
+    if (!show) return void res.status(404).json({ error: "Demo not found" });
+    res.json(await showFeedback(show, body.data, recordUsage(null)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal feedback");
   }
 });
 

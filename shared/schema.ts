@@ -223,7 +223,7 @@ export type DeckPatch = z.infer<typeof DeckPatchSchema>;
 /** One thing that happened while presenting. `t` is ms since the run started. */
 export const RunEventSchema = z.discriminatedUnion("type", [
   z.object({ t: z.number(), type: z.literal("slide"), slide: z.number().int() }),
-  z.object({ t: z.number(), type: z.literal("zoom"), slide: z.number().int(), regionId: z.string(), label: z.string(), cue: CueSchema.optional() }),
+  z.object({ t: z.number(), type: z.literal("zoom"), slide: z.number().int(), regionId: z.string(), label: z.string(), cue: CueSchema.optional(), score: z.number().optional(), latencyMs: z.number().optional() }),
   z.object({ t: z.number(), type: z.literal("command"), slide: z.number().int(), command: z.string(), text: z.string() }),
   z.object({ t: z.number(), type: z.literal("heard"), slide: z.number().int(), text: z.string(), simulated: z.boolean().optional() }),
 ]);
@@ -287,8 +287,23 @@ export const BeatSchema = z.object({
   landmarks: z.array(z.string()),
   /** corrections from dry runs */
   notes: z.string(),
+  /** what Stage taught itself from its own dry runs; separate from the presenter's notes so it never overwrites them */
+  lessons: z.array(z.string()).max(8).optional(),
 });
+/** Learning adds trigger phrases up to this many per beat, and keeps this many of its newest lessons. */
+export const MAX_BEAT_CUES = 12;
+export const MAX_LESSONS = 5;
 export type Beat = z.infer<typeof BeatSchema>;
+
+/**
+ * Run logs (deck run transcripts, dry-run traces) are only kept this long. They're read for learning right after each
+ * run and across recent runs, then expire. LOG_RETENTION_DAYS in the environment overrides it.
+ */
+export const LOG_RETENTION_DAYS = 15;
+export const logRetentionMs = (env: Record<string, string | undefined> = {}) => {
+  const days = Number(env.LOG_RETENTION_DAYS);
+  return (Number.isFinite(days) && days > 0 ? days : LOG_RETENTION_DAYS) * 24 * 60 * 60 * 1000;
+};
 
 /** What the operator may touch in this show. */
 export const ShowLimitsSchema = z.object({
@@ -368,10 +383,10 @@ export interface MatterDetail {
 export type DeckDetail = DeckRecord & { matterName: string; matterSolo: boolean };
 export type RunDetail = Run & { matterName: string; deckExists: boolean };
 
-/** One billed Claude call during analysis: the whole-deck plan, a slide, or one region the presenter drew. */
+/** One billed Claude call: the whole-deck plan, a slide, one region the presenter drew, or a robot rehearsal's script or feedback. */
 export interface UsageEntry extends TokenUsage {
   deckId: string | null;
-  kind: "plan" | "slide" | "region";
+  kind: "plan" | "slide" | "region" | "rehearse";
   slideIndex: number | null;
   model: string;
   effort: string;
