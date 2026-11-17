@@ -145,7 +145,7 @@ export const LEARN_SCHEMA = {
         required: ["id", "phrases"],
         properties: {
           id: { type: "string" },
-          phrases: { type: "array", items: { type: "string" }, maxItems: 4 },
+          phrases: { type: "array", items: { type: "string" } },
         },
       },
     },
