@@ -13,6 +13,7 @@ For each region:
 - label: 2-5 word name
 - description: one sentence describing what it shows
 - keywords: 5 to 10 words or short phrases a presenter might SAY out loud when discussing it. Include spoken forms of numbers ("38 percent", "2.4 million"), synonyms, and the specific nouns visible in it. Avoid generic words that apply to every region on the slide.
+- phrases: 3 to 6 things the presenter would actually say when transitioning to or introducing this region, each 3 to 7 words. Use natural spoken language — these should sound like a real presenter, not like slide text. Include transitional lead-ins ("let's look at", "moving on to", "let me show you"), paraphrases that don't copy the slide's wording, and at least one that names the section or label (e.g. "let's look at the results"). These are what trigger the zoom without exact keyword matches.
 - box: tight bounding box as fractions of slide width and height: x, y = top-left corner, w, h = size, all between 0 and 1. Measure carefully against the image; include the region's own labels/values.`;
 
 /** Whole-deck pass: decide what deserves emphasis before anyone presents. */
@@ -156,12 +157,13 @@ export const RESPONSE_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "label", "description", "keywords", "box"],
+        required: ["id", "label", "description", "keywords", "phrases", "box"],
         properties: {
           id: { type: "string" },
           label: { type: "string" },
           description: { type: "string" },
           keywords: { type: "array", items: { type: "string" } },
+          phrases: { type: "array", items: { type: "string" } },
           box: {
             type: "object",
             additionalProperties: false,

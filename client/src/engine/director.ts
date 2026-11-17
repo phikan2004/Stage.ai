@@ -104,10 +104,26 @@ export class ZoomDirector {
 
   tick(now: number): TickResult {
     const scores = this.scores(now);
-    const r = step(this.state, this.guided ? this.gated(scores, now) : scores, now, this.active);
+    const effective = this.guided ? this.gated(scores, now) : this.ungated(scores, now);
+    const r = step(this.state, effective, now, this.active);
     this.state = r.state;
     if (r.action.type === "zoomTo") this.done.add(r.action.regionId);
     return { action: r.action, scores, state: r.state };
+  }
+
+  /**
+   * Unguided slides don't enforce any order, but a lead-in phrase ("let me show you", "talking about",
+   * "moving on to", etc.) near a region's keyword is strong presenter intent — boost the top region up to
+   * confidenceThreshold so it fires without requiring the presenter to repeat keywords multiple times.
+   * Requires a minimum raw score of 0.2 so truly unrelated content doesn't trigger on lead-ins alone.
+   */
+  private ungated(scores: RegionScore[], now: number): RegionScore[] {
+    const { finals, interim } = this.window.text(now, LEAD_IN_MS);
+    const leadIn = hasLeadIn(`${finals} ${interim}`);
+    if (!leadIn || scores.length === 0 || scores[0].score < 0.2) return scores;
+    return scores.map((s, i) =>
+      i === 0 ? { ...s, score: Math.max(s.score, this.active.confidenceThreshold) } : s,
+    );
   }
 
   private gated(scores: RegionScore[], now: number): RegionScore[] {

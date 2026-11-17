@@ -3,7 +3,7 @@ import type { RegionScore } from "./matcher";
 
 /** Words that tell the audience where to look; with one of these, less evidence is enough. */
 const LEAD_IN =
-  /\b(look(ing)? at|take a look|(you )?can see|you'll see|notice|focus on|point out|highlight|turn(ing)? to|moving (on )?to|pay attention|let's talk about|i want to talk about)\b/i;
+  /\b(look(ing)? at|take a look|(you )?can see|you('ll| can| will) see|notice|focus on|point out|highlight|turn(ing)? to|moving (on )?to|pay attention|let('s| me) (talk|walk|show|dive|jump|go|look|start|discuss|explain|break)|i want to (talk|show|discuss|highlight|walk|point)|let('s| me) (take a look|focus)|talk(ing)? about|discuss(ing)?|here (we have|you can|you'll|you see|is|are)|when it comes to|in terms of|as (for|far as)|on the (topic|subject) of|getting into|jumping to|starting with|first(ly)?|next up|moving on|speaking of|regarding|about)\b/i;
 
 export const hasLeadIn = (recentText: string) => LEAD_IN.test(recentText);
 
