@@ -101,7 +101,7 @@ function exportLog(run: RunDetail, segs: Segment[]): void {
   URL.revokeObjectURL(url);
 }
 
-const ENGINES: Record<string, string> = { deepgram: "Deepgram", chrome: "Chrome speech" };
+const ENGINES: Record<string, string> = { deepgram: "Deepgram", chrome: "Chrome speech", robot: "Robot rehearsal" };
 
 export default function RunView({ id }: { id: string }) {
   const [run, setRun] = useState<RunDetail | null>(null);

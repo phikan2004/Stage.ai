@@ -62,7 +62,7 @@ function parseDataUrl(url: string) {
   return { media_type: m[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: m[2] };
 }
 
-interface Call {
+export interface Call {
   system: string;
   schema: Record<string, unknown>;
   content: Anthropic.Beta.BetaContentBlockParam[];
@@ -72,7 +72,7 @@ interface Call {
   usage: (u: TokenUsage & { model: string; effort: string; costUsd: number | null; durationMs: number }) => Promise<void>;
 }
 
-async function callModel(call: Call): Promise<unknown> {
+export async function callModel(call: Call): Promise<unknown> {
   const started = Date.now();
   // Streamed because a whole-deck plan at high effort can outlast a plain request's timeout.
   const res = await getClient()
@@ -106,14 +106,14 @@ async function callModel(call: Call): Promise<unknown> {
   return JSON.parse(text);
 }
 
-function requireKey() {
+export function requireKey() {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new AnalyzeError("ANTHROPIC_API_KEY is not set on the server. Add it to .env, or use the sample deck.", 503);
   }
 }
 
 /** Run an attempt, feeding a validation error back once. API errors aren't retried here. */
-async function withRetry<T>(what: string, attempt: (retryError?: string) => Promise<T>): Promise<T> {
+export async function withRetry<T>(what: string, attempt: (retryError?: string) => Promise<T>): Promise<T> {
   let lastError = "";
   for (let i = 0; i < 2; i++) {
     try {
@@ -129,7 +129,7 @@ async function withRetry<T>(what: string, attempt: (retryError?: string) => Prom
   throw new AnalyzeError(`Claude returned an invalid ${what} twice: ${lastError}`);
 }
 
-const imageBlock = (url: string): Anthropic.Beta.BetaContentBlockParam => ({
+export const imageBlock = (url: string): Anthropic.Beta.BetaContentBlockParam => ({
   type: "image",
   source: { type: "base64", ...parseDataUrl(url) },
 });

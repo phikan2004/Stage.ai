@@ -383,10 +383,10 @@ export interface MatterDetail {
 export type DeckDetail = DeckRecord & { matterName: string; matterSolo: boolean };
 export type RunDetail = Run & { matterName: string; deckExists: boolean };
 
-/** One billed Claude call during analysis: the whole-deck plan, a slide, or one region the presenter drew. */
+/** One billed Claude call: the whole-deck plan, a slide, one region the presenter drew, or a robot rehearsal's script or feedback. */
 export interface UsageEntry extends TokenUsage {
   deckId: string | null;
-  kind: "plan" | "slide" | "region";
+  kind: "plan" | "slide" | "region" | "rehearse";
   slideIndex: number | null;
   model: string;
   effort: string;

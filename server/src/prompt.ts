@@ -17,6 +17,15 @@ For each region:
 - box: tight bounding box as fractions of slide width and height: x, y = top-left corner, w, h = size, all between 0 and 1. Measure carefully against the image; include the region's own labels/values.`;
 
 /** Whole-deck pass: decide what deserves emphasis before anyone presents. */
+/** What each cue does and when it fits. Shared by the director and the rehearsal coach so they never disagree. */
+export const CUE_GUIDE = `    - "outline" draws a rectangle around it. This is the default.
+    - "spotlight" dims everything else. Use it when the item must stand out from a lot around it but the rest of the layout still matters.
+    - "zoom" enlarges it. Use it only on a busy slide, when the item is too small to read from the back of a room.
+    - "highlight" sweeps a marker over text. Use it for one specific sentence, bullet or table row.
+    - "callout" outlines it and shows a short label. Use it for something visual the slide doesn't name.
+    - "arrow" points at it. Use it for one exact spot, such as a point on a chart.
+    - "reveal" hides it until the presenter reaches it. Use it rarely, for a conclusion or number that loses its punch if the audience reads it early.`;
+
 export const DIRECTOR_PROMPT = `You are directing a live presentation. While the presenter talks, an app emphasizes parts of the current slide on its own. The presenter never touches it, so your plan decides everything the audience sees.
 
 You receive every slide in order. Read the whole deck first, then decide what each slide is for and what, if anything, deserves emphasis.
@@ -34,13 +43,7 @@ For each slide:
 - emphasis: the items to emphasize, in the order a presenter would naturally reach them, after first introducing the slide. Each has:
   - target: a concrete description of the item that someone could find on the slide, quoting its visible text or number
   - cue: how to emphasize it. Choose the lightest one that works:
-    - "outline" draws a rectangle around it. This is the default.
-    - "spotlight" dims everything else. Use it when the item must stand out from a lot around it but the rest of the layout still matters.
-    - "zoom" enlarges it. Use it only on a busy slide, when the item is too small to read from the back of a room.
-    - "highlight" sweeps a marker over text. Use it for one specific sentence, bullet or table row.
-    - "callout" outlines it and shows a short label. Use it for something visual the slide doesn't name.
-    - "arrow" points at it. Use it for one exact spot, such as a point on a chart.
-    - "reveal" hides it until the presenter reaches it. Use it rarely, for a conclusion or number that loses its punch if the audience reads it early.
+${CUE_GUIDE}
   - why: why it matters to the deck's argument
 
 Also give summary: two or three sentences on what the deck argues and who it is for.

@@ -44,7 +44,7 @@ async function thumbnail(img: SlideImage, width = 480): Promise<Blob> {
 /** Hosts cap a request at about 4.5 MB, and a whole deck goes up in one. */
 const PLAN_REQUEST_BYTES = 3_500_000;
 
-async function shrink(url: string, width: number, height: number): Promise<string> {
+async function shrink(url: string, width: number, height: number, quality = 0.6): Promise<string> {
   const el = new Image();
   el.src = url;
   await el.decode();
@@ -52,7 +52,12 @@ async function shrink(url: string, width: number, height: number): Promise<strin
   canvas.width = width;
   canvas.height = height;
   canvas.getContext("2d")!.drawImage(el, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", 0.6);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+/** One slide as a JPEG data URL, wide enough for Claude to measure boxes on it. */
+export async function slideImage(img: SlideImage, width = 1200): Promise<string> {
+  return shrink(img.url, width, Math.round((width * img.height) / img.width), 0.85);
 }
 
 /** The slide with one area marked in red, so Claude sees exactly what the presenter drew. */

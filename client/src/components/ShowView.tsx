@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyShowChanges, applyVoice, describeChange, describeVoiceChange, MAX_HISTORY, type ChatTurn, type ShowChange, type ShowScript } from "../../../shared/rehearse";
 import { beatScore, MAX_BEAT_CUES, MAX_DRY_RUNS, MAX_LESSONS, type Beat, type DryRun, type Matter, type Show, type ShowLimits, type ShowPatch } from "../../../shared/schema";
 import { CueDirector, type CueBeat, type FlowState } from "../engine/cues";
 import { api } from "../lib/api";
@@ -8,6 +9,9 @@ import { frameUrl, useStage } from "../lib/stage";
 import { DeepgramSpeechSource } from "../speech/DeepgramSpeechSource";
 import type { SpeechResult, SpeechSource } from "../speech/SpeechSource";
 import { WebSpeechSource } from "../speech/WebSpeechSource";
+import { RobotSpeechSource, robotVoiceSupported } from "../speech/RobotSpeechSource";
+import RehearsalChat, { type ChatMessage } from "./RehearsalChat";
+import RobotVoiceControls, { tuneRobot, useRobotVoice } from "./RobotVoiceControls";
 import { Loading, TopBar } from "./Chrome";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -21,6 +25,8 @@ const FLOW_LABEL: Record<FlowState, (next: string) => string> = {
   held: (next) => `Holding before ${next}. Say "go ahead" when you're ready.`,
   done: () => "That was the last step.",
 };
+/** Lines of the rehearsal kept to send with feedback. */
+const MAX_REHEARSE_LOG = 300;
 /** Deepgram's limit on boosted terms, shared across the show. */
 const MAX_KEYTERMS = 50;
 
@@ -49,6 +55,26 @@ export default function ShowView({ id }: { id: string }) {
   const director = useRef<CueDirector | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pending = useRef<ShowPatch>({});
+
+  /* robot rehearsal: a robot talks the demo through while the operator performs it, and feedback in a chat tunes it */
+  const [rehearsing, setRehearsing] = useState(false);
+  const [script, setScript] = useState<ShowScript | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const robot = useRef<RobotSpeechSource | null>(null);
+  /** true while the current dry run is the robot's */
+  const robotRun = useRef(false);
+  const robotOffs = useRef<(() => void)[]>([]);
+  const rehearseLog = useRef<string[]>([]);
+  /** start the robot's run again once the runner is free */
+  const rerun = useRef(false);
+  /** feedback is with Claude, so a run stopping now is expected */
+  const awaitingCoach = useRef(false);
+  const nextMsg = useRef(0);
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
+  const { voice, setVoice, voices } = useRobotVoice();
+  useEffect(() => tuneRobot(robot.current, voice), [voice]);
 
   // The project it's in, if any; a demo on its own lives in a hidden matter.
   const [project, setProject] = useState<Matter | null>(null);
@@ -94,6 +120,7 @@ export default function ShowView({ id }: { id: string }) {
     }
     if (msg.type === "beat") setActiveBeat(msg.beatId);
     if (msg.type === "waiting") setWaiting(true);
+    if (robotRun.current) robotHears(msg);
     if (msg.type === "begun") setWaiting(false);
     if (msg.type === "cued") {
       director.current?.passed(msg.beatId);
@@ -143,6 +170,155 @@ export default function ShowView({ id }: { id: string }) {
     speech.current = source;
     source.start();
   };
+
+  /* ---------- robot rehearsal ---------- */
+  const note = (role: ChatMessage["role"], text: string, extra: Partial<ChatMessage> = {}) =>
+    setMessages((m) => [...m, { id: nextMsg.current++, role, text, ...extra }]);
+  const logLine = (line: string) => {
+    rehearseLog.current = [...rehearseLog.current, line].slice(-MAX_REHEARSE_LOG);
+  };
+  const beatName = (beatId: string) => {
+    const at = showRef.current?.beats.findIndex((b) => b.id === beatId) ?? -1;
+    return at < 0 ? beatId : `Cue ${at + 1}, "${showRef.current!.beats[at].label}"`;
+  };
+  const linesFor = (beatId: string | undefined) => scriptRef.current?.beats.find((b) => b.beatId === beatId)?.lines ?? [];
+
+  /** What the runner tells the console, seen from the robot's side: when to talk, and what to remember for feedback. */
+  function robotHears(msg: any) {
+    const beats = showRef.current?.beats ?? [];
+    // The screen is ready: open with the first beat's lines.
+    if (msg.type === "waiting") void robot.current?.say(linesFor(beats[0]?.id));
+    if (msg.type === "cued") {
+      logLine(`${beatName(msg.beatId)} started`);
+      // Talk about the next step while the operator works on this one, as a presenter would.
+      const at = beats.findIndex((b) => b.id === msg.beatId);
+      if (at >= 0 && beats[at + 1]) void robot.current?.say(linesFor(beats[at + 1].id));
+    }
+    if (msg.type === "agent") {
+      const line = describeEvent(msg.event);
+      if (line) logLine(`  operator: ${line}`);
+    }
+    if (msg.type === "beat:done") logLine(`${beatName(msg.beatId)} ${msg.outcome}`);
+    if (msg.type === "dry-run:done") {
+      robotRun.current = false;
+      robot.current?.cancel();
+      robotOffs.current.forEach((off) => off());
+      robotOffs.current = [];
+      const results: DryRun["results"] = msg.run.results;
+      const all = beats.length > 0 && results.length === beats.length && results.every((r) => r.outcome === "done");
+      if (!rerun.current && !awaitingCoach.current) note("note", all ? "Every cue passed. Tell me what to change, or run it again." : `Stopped: ${results.at(-1)?.summary ?? "no cues ran."} Tell me what went wrong.`);
+    }
+  }
+
+  const openRehearsal = async () => {
+    // Made on the click, so the browser lets it speak.
+    robot.current ??= new RobotSpeechSource();
+    tuneRobot(robot.current, voice);
+    setRehearsing(true);
+    setError(null);
+    if (scriptRef.current) return;
+    try {
+      setScript(await api.showScript(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const startRobotRun = async () => {
+    const r = robot.current;
+    if (!r || !scriptRef.current) return;
+    await flush();
+    setError(null);
+    setLog([]);
+    setLastRun(null);
+    setLearned(null);
+    rehearseLog.current = [];
+    const beats = showRef.current?.beats ?? [];
+    director.current = new CueDirector(beats);
+    setNextCue(director.current.next);
+    robotOffs.current.forEach((off) => off());
+    // The robot's words go to the cue director only. They're never sent to the runner as the presenter's, so
+    // learning can't turn them into trigger words.
+    robotOffs.current = [
+      r.onResult((res) => {
+        director.current?.hear(res.text, res.isFinal, res.timestamp);
+        if (res.text.trim()) setHeard(res.text.trim());
+        if (res.isFinal) logLine(`  robot said: "${res.text.trim()}"`);
+      }),
+    ];
+    r.cancel();
+    r.start();
+    speech.current = r;
+    robotRun.current = true;
+    stage.send({ type: "dry-run", show: showRef.current });
+  };
+
+  // After feedback, run again as soon as the runner has stopped the last one.
+  useEffect(() => {
+    if (!rerun.current || stage.busy || !stage.connected) return;
+    rerun.current = false;
+    void startRobotRun();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage.busy, stage.connected, show]);
+
+  const sendFeedback = async (feedback: string) => {
+    const current = showRef.current;
+    const s = scriptRef.current;
+    if (!current || !s) return;
+    const history: ChatTurn[] = messages
+      .filter((m) => m.role !== "note")
+      .map((m) => ({ role: m.role as ChatTurn["role"], text: m.text }))
+      .slice(-MAX_HISTORY);
+    note("presenter", feedback);
+    const wasRunning = robotRun.current;
+    awaitingCoach.current = true;
+    robot.current?.cancel();
+    if (wasRunning) stage.send({ type: "stop" });
+    setThinking(true);
+    try {
+      const reply = await api.showFeedback(id, { feedback, history, log: rehearseLog.current, script: s, voice, voices });
+      const before = { beats: current.beats, script: s };
+      const out = applyShowChanges(before.beats, before.script, reply.changes);
+      const newVoice = applyVoice(voice, reply.voice, voices);
+      const voiceLine = describeVoiceChange(voice, newVoice);
+      if (voiceLine) setVoice(newVoice);
+      if (!out.applied.length) {
+        // A voice change alone still runs it again, so they can hear it.
+        if (voiceLine && wasRunning) rerun.current = true;
+        note("coach", `${reply.reply}${voiceLine && wasRunning ? " Running it again from the start." : wasRunning ? " Press Start to run it again." : ""}`, voiceLine ? { changes: [voiceLine] } : {});
+        return;
+      }
+      change({ beats: out.beats });
+      setScript(out.script);
+      const msgId = nextMsg.current;
+      const undo = () => {
+        change({ beats: before.beats });
+        setScript(before.script);
+        if (voiceLine) setVoice(voice);
+        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, undone: true } : x)));
+        note("note", "Undone. Press Start to run it with the earlier version.");
+      };
+      setMessages((m) => m.map((x) => (x.undo ? { ...x, undo: undefined } : x)));
+      note("coach", `${reply.reply} Running it again from the start.`, {
+        changes: [...out.applied.map((c) => describeChange(c, (x) => beatName((x as ShowChange).beatId))), ...(voiceLine ? [voiceLine] : [])],
+        undo,
+      });
+      rerun.current = true;
+    } catch (e) {
+      note("note", `Couldn't get that done: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      awaitingCoach.current = false;
+      setThinking(false);
+    }
+  };
+
+  const closeRehearsal = () => {
+    if (robotRun.current) stage.send({ type: "stop" });
+    robot.current?.cancel();
+    rerun.current = false;
+    setRehearsing(false);
+  };
+  useEffect(() => () => robot.current?.cancel(), []);
 
   const startRecording = async () => {
     setError(null);
@@ -303,9 +479,16 @@ export default function ShowView({ id }: { id: string }) {
                     </button>
                   </>
                 ) : (
-                  <button className="btn primary" disabled={!ready} onClick={startDryRun}>
-                    Start dry run
-                  </button>
+                  <>
+                    <button className="btn primary" disabled={!ready} onClick={startDryRun}>
+                      Start dry run
+                    </button>
+                    {robotVoiceSupported() && !rehearsing && (
+                      <button className="btn" disabled={!ready} onClick={openRehearsal} title="A robot talks the demo through while the AI performs it, and you give feedback in a chat">
+                        Rehearse with robot
+                      </button>
+                    )}
+                  </>
                 )}
                 <span className="hint">
                   The screen goes black until you say your first line. After that it follows you: each step runs when you finish your thought or start on the next one. Say "hold on" to pause and "go ahead" to carry on. Space or Return moves on, and double Esc stops it from anywhere.
@@ -327,6 +510,68 @@ export default function ShowView({ id }: { id: string }) {
                 </div>
               )}
               {learned && <div className="banner">Learned from this run: {learned}. You'll find them in the cues below.</div>}
+              {rehearsing && (
+                <div className="show-rehearse">
+                  <div>
+                    <div className="section-head">
+                      <h3 className="micro">What the robot says before each cue</h3>
+                    </div>
+                    {!script ? (
+                      <Loading text="Writing the script…" />
+                    ) : (
+                      <ol className="rehearse-lines">
+                        {show.beats.map((b, i) => {
+                          const text = script.beats.find((x) => x.beatId === b.id)?.lines.join("\n") ?? "";
+                          return (
+                            <li key={b.id}>
+                              <span className="micro">
+                                Cue {i + 1} · {b.label}
+                              </span>
+                              <textarea
+                                className="field"
+                                key={text}
+                                defaultValue={text}
+                                rows={2}
+                                onBlur={(e) =>
+                                  setScript({
+                                    beats: show.beats.map((x) => (x.id === b.id ? { beatId: x.id, lines: lines(e.target.value) } : (script.beats.find((y) => y.beatId === x.id) ?? { beatId: x.id, lines: [] }))),
+                                  })
+                                }
+                              />
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </div>
+                  <RehearsalChat
+                    status={
+                      thinking
+                        ? "Stopped while Claude reads your feedback"
+                        : busy === "dry-run" && robotRun.current
+                          ? "The robot is presenting and the AI is performing"
+                          : script
+                            ? "Ready. The robot speaks aloud; your mic stays off."
+                            : "Writing the script…"
+                    }
+                    messages={messages}
+                    thinking={thinking}
+                    onSend={sendFeedback}
+                    settings={<RobotVoiceControls voice={voice} voices={voices} onChange={setVoice} />}
+                    placeholder="e.g. It opened the wrong account, or talk a bit faster"
+                    actions={
+                      <>
+                        <button className="btn small primary" disabled={!ready || !script || thinking} onClick={startRobotRun}>
+                          Start
+                        </button>
+                        <button className="btn small ghost" onClick={closeRehearsal}>
+                          Close
+                        </button>
+                      </>
+                    }
+                  />
+                </div>
+              )}
             </section>
 
             <section className="section">

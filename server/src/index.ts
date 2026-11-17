@@ -5,6 +5,9 @@ import express from "express";
 import { CueSchema, DeckPlanRequestSchema, logRetentionMs, SlideFactsSchema } from "../../shared/schema.ts";
 import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, learnFromRun, model, planDeck, type UsageSink } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
+import { deckFeedback, deckScript, showFeedback, showScript } from "./rehearse.ts";
+import { CueChatRequestSchema, DeckFeedbackRequestSchema, DeckScriptRequestSchema, ShowFeedbackRequestSchema } from "../../shared/rehearse.ts";
+import { cueChat } from "./cueChat.ts";
 import { FileStore, type Library } from "./store.ts";
 import { SupabaseStore } from "./supabaseStore.ts";
 import { createSttSession, SttError } from "./stt.ts";
@@ -131,6 +134,69 @@ app.post("/api/decks/:id/plan", async (req, res) => {
     res.json(plan);
   } catch (e) {
     sendAnalyzeError(res, e, "plan");
+  }
+});
+
+/* ---------- cue chat: customize a slide's cues in plain words ---------- */
+
+app.post("/api/decks/:id/cues/chat", async (req, res) => {
+  const body = CueChatRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await cueChat(deck, body.data, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "chat");
+  }
+});
+
+/* ---------- robot rehearsal ---------- */
+
+app.post("/api/decks/:id/rehearse/script", async (req, res) => {
+  const body = DeckScriptRequestSchema.safeParse(req.body ?? {});
+  if (!body.success) return void res.status(400).json({ error: "Body must be { notes?: string[] }" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await deckScript(deck, body.data.notes, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal script");
+  }
+});
+
+app.post("/api/decks/:id/rehearse/feedback", async (req, res) => {
+  const body = DeckFeedbackRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const deck = await store.deck(req.params.id);
+    if (!deck) return void res.status(404).json({ error: "Presentation not found" });
+    res.json(await deckFeedback(deck, body.data, recordUsage(deck.id)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal feedback");
+  }
+});
+
+app.post("/api/shows/:id/rehearse/script", async (req, res) => {
+  try {
+    const show = await store.show(req.params.id);
+    if (!show) return void res.status(404).json({ error: "Demo not found" });
+    if (!show.beats.length) return void res.status(409).json({ error: "Teach this demo before rehearsing it." });
+    res.json(await showScript(show, recordUsage(null)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal script");
+  }
+});
+
+app.post("/api/shows/:id/rehearse/feedback", async (req, res) => {
+  const body = ShowFeedbackRequestSchema.safeParse(req.body);
+  if (!body.success) return void res.status(400).json({ error: body.error.issues[0]?.message ?? "Invalid request" });
+  try {
+    const show = await store.show(req.params.id);
+    if (!show) return void res.status(404).json({ error: "Demo not found" });
+    res.json(await showFeedback(show, body.data, recordUsage(null)));
+  } catch (e) {
+    sendAnalyzeError(res, e, "rehearsal feedback");
   }
 });
 

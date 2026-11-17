@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { DeckScript } from "../../../shared/rehearse";
 import type { DeckDetail, Region, RunInput, Slide } from "../../../shared/schema";
 import { api } from "../lib/api";
 import { cacheImages, cachedImages, renderDeck, takeNotices, type Deck } from "../lib/deck";
 import { deckTitle } from "../lib/format";
 import { Loading, TopBar } from "./Chrome";
+import DeckRehearsal from "./DeckRehearsal";
 import PresentView from "./PresentView";
 import ReviewEditor from "./ReviewEditor";
 
-type Stage = "review" | "present";
+type Stage = "review" | "present" | "rehearse";
 type SaveState = "saved" | "saving" | "error";
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -24,6 +26,8 @@ export default function DeckView({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  /** the robot's script, kept while this page is open so a second rehearsal doesn't write a new one */
+  const [script, setScript] = useState<DeckScript | null>(null);
   /** last slides the server has; pending = waiting to be sent */
   const saved = useRef<Slide[] | null>(null);
   const pending = useRef<Slide[] | null>(null);
@@ -109,6 +113,12 @@ export default function DeckView({ id }: { id: string }) {
     document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
+  const rehearse = (from: number) => {
+    setStartSlide(from);
+    setStage("rehearse");
+  };
+  const setSlides = useCallback((slides: Slide[]) => setDeck((d) => d && { ...d, slides }), []);
+
   const onRunEnd = useCallback(
     (run: Omit<RunInput, "deckId">, unloading: boolean) => {
       if (run.endedAt - run.startedAt < MIN_RUN_MS) return;
@@ -134,6 +144,24 @@ export default function DeckView({ id }: { id: string }) {
           setStartSlide(at);
           setStage("review");
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        }}
+      />
+    );
+  }
+
+  if (stage === "rehearse" && deck) {
+    return (
+      <DeckRehearsal
+        deckId={id}
+        deck={deck}
+        startIndex={startSlide}
+        script={script}
+        onScript={setScript}
+        onSlides={setSlides}
+        onRunEnd={onRunEnd}
+        onExit={(at) => {
+          setStartSlide(at);
+          setStage("review");
         }}
       />
     );
@@ -184,6 +212,7 @@ export default function DeckView({ id }: { id: string }) {
             initialIndex={startSlide}
             onRegions={setRegions}
             onPresent={present}
+            onRehearse={rehearse}
           />
         </>
       )}
