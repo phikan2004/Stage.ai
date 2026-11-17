@@ -108,6 +108,50 @@ export const REGION_SCHEMA = {
   },
 } as const;
 
+/**
+ * Text-only pass that runs after a presentation. Given what the presenter said on each slide and
+ * the regions that slide contains, extract natural phrases they actually used for each region.
+ * These are added to the region's trigger phrases so future runs zoom without exact keyword matches.
+ */
+export const LEARN_PROMPT = `You improve automated zoom detection for a presentation tool. As someone presents, the tool zooms into whichever part of the current slide they're discussing, matched by keywords and phrases. After each session you receive the transcript of what was said and the slide regions, and extract natural phrases the presenter used that signal they were discussing each region.
+
+Rules:
+- Only use words the presenter actually said — pull phrases verbatim from the transcript
+- Each phrase must be 3–7 words
+- Prefer natural transitions and paraphrases ("here's what we found", "our approach was") over restating slide text verbatim
+- Skip a region if the presenter didn't clearly discuss it; return an empty phrases array
+- Return 0 to 4 phrases per region`;
+
+export function learnPrompt(
+  regions: { id: string; label: string; keywords: string[] }[],
+  transcript: string,
+): string {
+  const list = regions
+    .map((r, i) => `${i + 1}. id="${r.id}" label="${r.label}" keywords: ${r.keywords.slice(0, 5).join(", ")}`)
+    .join("\n");
+  return `Slide regions:\n${list}\n\nTranscript of what the presenter said:\n"${transcript.slice(0, 2000)}"`;
+}
+
+export const LEARN_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["regions"],
+  properties: {
+    regions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "phrases"],
+        properties: {
+          id: { type: "string" },
+          phrases: { type: "array", items: { type: "string" }, maxItems: 4 },
+        },
+      },
+    },
+  },
+} as const;
+
 export const userPrompt = (retryError?: string) =>
   retryError
     ? `Your previous answer was invalid: ${retryError}\nReturn corrected JSON for this slide.`

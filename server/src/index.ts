@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
 import { CueSchema, DeckPlanRequestSchema, SlideFactsSchema } from "../../shared/schema.ts";
-import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, model, planDeck, type UsageSink } from "./analyze.ts";
+import { AnalyzeError, analyzeSlide, currentPlan, describeRegion, learnFromRun, model, planDeck, type UsageSink } from "./analyze.ts";
 import { libraryRouter } from "./library.ts";
 import { FileStore, type Library } from "./store.ts";
 import { SupabaseStore } from "./supabaseStore.ts";
@@ -30,7 +30,14 @@ const store = await openLibrary();
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
-app.use("/api", libraryRouter(store));
+app.use(
+  "/api",
+  libraryRouter(store, (runId) => {
+    learnFromRun(runId, store).catch((e) =>
+      console.error(`learn: run ${runId} failed: ${e instanceof Error ? e.message : e}`),
+    );
+  }),
+);
 
 /** Logging what a call cost must never cost the user their analysis. */
 const recordUsage = (deckId: string | null): UsageSink => async (entry) => {
