@@ -4,7 +4,7 @@ import type { DeckSummary, HomeData, MatterSummary, Show } from "../../../shared
 import { api } from "../lib/api";
 import { addDeck, createSampleMatter, pickFiles } from "../lib/deck";
 import { deckTitle, plural } from "../lib/format";
-import { go } from "../lib/router";
+import { back as goBack, go } from "../lib/router";
 import { coverUrl } from "../lib/stage";
 import { ConfirmDialog, Loading, NameDialog, Select, TopBar, type Tab } from "./Chrome";
 
@@ -79,7 +79,7 @@ export default function LibraryView({ tab, projectId }: { tab: Tab; projectId?: 
 
   return (
     <>
-      <TopBar tab={tab} back={projectId ? "/projects" : undefined}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
+      <TopBar tab={tab}>{data && <NewMenu projects={projects} current={project} />}</TopBar>
       <main className="page">
         {error && <div className="banner err">{error}</div>}
         {!data && !error && <Loading />}
@@ -136,6 +136,7 @@ function Overview({
 
   const intro = INTRO[tab];
   const what = tab === "projects" ? "projects" : tab === "decks" ? "decks" : "demos";
+  const kind: NewKind = tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo";
   return (
     <>
       <div className="page-head">
@@ -161,6 +162,7 @@ function Overview({
         <div className="empty-row">Demos aren't available here yet.</div>
       ) : shown.length ? (
         <div className="cards library">
+          {!q && <StartCard kind={kind} hint={`Add another ${kind}.`} />}
           {shown.map((e) =>
             e.kind === "project" ? (
               <ProjectCard
@@ -180,7 +182,7 @@ function Overview({
         <div className="empty-row">Nothing matches “{query.trim()}”.</div>
       ) : (
         <div className="cards library">
-          <StartCard kind={tab === "projects" ? "project" : tab === "decks" ? "deck" : "demo"} hint={`You don't have any ${what} yet.`} />
+          <StartCard kind={kind} hint={`You don't have any ${what} yet.`} />
         </div>
       )}
 
@@ -214,6 +216,9 @@ function ProjectPage({ project, data, shows, reload }: { project: MatterSummary;
           <h1 className="display">{project.name}</h1>
         </div>
         <div className="page-actions">
+          <button className="btn small ghost" onClick={() => goBack("/projects")}>
+            ← Back
+          </button>
           <button className="btn small ghost" onClick={() => setRenaming(true)}>
             Rename
           </button>
@@ -419,7 +424,7 @@ function Cover({ show }: { show: Show }) {
   return url && !failed ? <img src={url} alt="" onError={() => setFailed(true)} /> : null;
 }
 
-/** One dot per cue: green if the last dry run got through it, orange if not, hollow if never tried. */
+/** One dot per cue: green if the last dry run got through it, coral if not, hollow if never tried. */
 function BeatDots({ show: s }: { show: Show }) {
   const last = s.dryRuns.at(-1);
   return (

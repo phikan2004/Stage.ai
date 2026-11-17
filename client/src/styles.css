@@ -4,15 +4,14 @@
   --card: #ffffff;
   --sand: #f5f3f1;
   --sand-2: #eeebe8;
-  --orange: #f2922c;
   --sage: #8fa936;
   --ink: #000000;
   --ink-2: #4a4a48;
   --muted: #8a8a86;
   --rule: #ebe9e6;
   --rule-strong: #dcdad6;
-  --accent: #dd512c;
-  --accent-soft: #fbefea;
+  --accent: #f0654a;
+  --accent-soft: #fdeeea;
   /* the second brand colour: a vivid blue for primary actions, selection, regions and the stage */
   --indigo: #3951d0;
   --indigo-2: #2c42ba;
@@ -364,7 +363,7 @@ a.btn { text-decoration: none; color: var(--ink); }
 .cue-popup .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; border-radius: 0; padding: 0; background: none; }
 .cue-popup .seg button { box-shadow: var(--ring); }
 .cue-popup .seg button.on { background: var(--indigo); color: #fff; box-shadow: none; }
-.draft { position: absolute; border: 1.5px dashed var(--accent); background: rgba(221, 81, 44, 0.08); pointer-events: none; }
+.draft { position: absolute; border: 1.5px dashed var(--accent); background: rgba(240, 101, 74, 0.08); pointer-events: none; }
 .hint { color: var(--muted); font-size: 13px; }
 
 /* ---------- present ---------- */
@@ -427,10 +426,10 @@ a.btn { text-decoration: none; color: var(--ink); }
   position: absolute;
   border: 3px solid var(--accent);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 2px 14px rgba(221, 81, 44, 0.35);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 2px 14px rgba(240, 101, 74, 0.35);
   pointer-events: none;
 }
-.spot.debug-outline { outline: 1px dashed rgba(221, 81, 44, 0.8); }
+.spot.debug-outline { outline: 1px dashed rgba(240, 101, 74, 0.8); }
 .hud {
   position: fixed;
   left: 16px;
@@ -446,7 +445,7 @@ a.btn { text-decoration: none; color: var(--ink); }
   z-index: 5;
 }
 .hud .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: #666; }
-.hud .dot.on { background: var(--accent); box-shadow: 0 0 0 3px rgba(221, 81, 44, 0.2); }
+.hud .dot.on { background: var(--accent); box-shadow: 0 0 0 3px rgba(240, 101, 74, 0.2); }
 .hud .dot.listening { background: #7fb38d; }
 .hud .dot.error { background: #e0604c; }
 .slide-no { position: fixed; right: 16px; bottom: 14px; font-size: 10px; letter-spacing: 0.16em; color: rgba(255, 255, 255, 0.35); }
@@ -481,12 +480,12 @@ a.btn { text-decoration: none; color: var(--ink); }
 .debug .transcript { font-size: 13px; line-height: 1.5; min-height: 60px; }
 .debug .transcript .interim { color: rgba(255, 255, 255, 0.45); font-style: italic; }
 .debug .phase { display: inline-block; padding: 2px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
-.debug .phase.dwell { background: rgba(221, 81, 44, 0.25); color: #ffb79f; }
-.debug .phase.zoomed { background: rgba(221, 81, 44, 0.45); color: #fff; }
+.debug .phase.dwell { background: rgba(240, 101, 74, 0.25); color: #ffb8a8; }
+.debug .phase.zoomed { background: rgba(240, 101, 74, 0.45); color: #fff; }
 .debug .phase.cooldown { background: rgba(127, 179, 141, 0.25); color: #b6dcc0; }
 .score { display: grid; grid-template-columns: 1fr 40px; gap: 2px 8px; align-items: center; margin-bottom: 8px; }
 .score .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score .name.current { color: #ffb79f; }
+.score .name.current { color: #ffb8a8; }
 .score .val { text-align: right; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.6); }
 .score .bar { grid-column: 1 / -1; height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 2px; position: relative; }
 .score .bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: #9aa7b8; border-radius: 2px; transition: width 0.1s; }
@@ -504,14 +503,14 @@ a.btn { text-decoration: none; color: var(--ink); }
 .debug .bad { color: #ff9b87; }
 .debug .level { height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; margin: 6px 0 10px; }
 .debug .level > i { display: block; height: 100%; background: #7fb38d; transition: width 0.08s; }
-.debug .mic-help { color: #ffb79f; margin: 4px 0 6px; line-height: 1.4; }
+.debug .mic-help { color: #ffb8a8; margin: 4px 0 6px; line-height: 1.4; }
 .debug .speech-log {
   margin: 6px 0 0; padding: 8px; max-height: 150px; overflow-y: auto; white-space: pre-wrap;
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: rgba(255, 255, 255, 0.6);
   background: rgba(0, 0, 0, 0.25); border-radius: 8px;
 }
 .debug .engine-switch { display: flex; gap: 6px; margin-bottom: 10px; }
-.debug .engine-switch .btn.on { background: rgba(221, 81, 44, 0.3); border-color: var(--accent); color: #fff; }
+.debug .engine-switch .btn.on { background: rgba(240, 101, 74, 0.3); border-color: var(--accent); color: #fff; }
 .voice-toast {
   position: fixed;
   left: 50%;
@@ -625,7 +624,7 @@ a.btn { text-decoration: none; color: var(--ink); }
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3 7.4 5.8 10 11 4.4' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-/* checkboxes are switches: the knob slides, the track fills orange */
+/* checkboxes are switches: the knob slides, the track fills with the accent */
 input[type="checkbox"] {
   appearance: none; -webkit-appearance: none; flex: none; position: relative; vertical-align: middle;
   width: 30px; height: 18px; margin: 0 6px 0 0; border-radius: 999px; cursor: pointer;

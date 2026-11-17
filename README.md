@@ -218,7 +218,7 @@ deck's total. Prices live in `shared/plans.ts`.
 |---|---|
 | `→` / `←` (also PageDown/PageUp, Space) | Next / previous slide (always zooms out) |
 | `Esc` | Zoom out now. Press again (when not zoomed) to leave full-screen, and again to return to the editor (this saves the run) |
-| `A` | Toggle automation (bottom-left dot: orange = auto) |
+| `A` | Toggle automation (bottom-left dot: coral = auto) |
 | `D` | Debug panel |
 | `F` | Toggle full-screen |
 
