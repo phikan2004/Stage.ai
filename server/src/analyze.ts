@@ -68,6 +68,7 @@ interface Call {
   content: Anthropic.Beta.BetaContentBlockParam[];
   effort: Effort;
   maxTokens: number;
+  modelOverride?: string;
   usage: (u: TokenUsage & { model: string; effort: string; costUsd: number | null; durationMs: number }) => Promise<void>;
 }
 
@@ -76,7 +77,7 @@ async function callModel(call: Call): Promise<unknown> {
   // Streamed because a whole-deck plan at high effort can outlast a plain request's timeout.
   const res = await getClient()
     .beta.messages.stream({
-      model: model(),
+      model: call.modelOverride ?? model(),
       max_tokens: call.maxTokens,
       // On a safety decline, re-run on Anthropic's recommended fallback model instead of failing.
       betas: ["server-side-fallback-2026-07-01"],
@@ -285,6 +286,7 @@ export async function learnFromRun(runId: string, store: Library): Promise<void>
         content: [{ type: "text", text: learnPrompt(regionInput, transcript) }],
         effort: "low" as Effort,
         maxTokens: 1000,
+        modelOverride: "claude-haiku-5-5",
         usage: (u) => onUsage({ ...u, kind: "region", slideIndex }),
       });
 
