@@ -1,7 +1,24 @@
 # Stage
 
-A prototype presentation surface that listens while you present and automatically zooms into the part of the slide
-you're talking about. It exists to answer one question: **does the effect feel good?**
+A prototype that helps you present. It listens while you talk and does two things:
+
+- **Decks:** it zooms, spotlights or highlights the part of the slide you're talking about.
+- **Demos:** an AI operator performs a live software demo on your Mac as you talk through it. It learns the demo
+  from one recording of you doing it, then acts live on the real screen each time. Nothing is replayed.
+
+Decks and demos can live together in a **project** (for example, one client meeting). It's built for pitches and long
+client meetings with dense slides.
+
+## Contents
+
+- [Setup](#setup)
+- [Projects, decks, demos and runs](#projects-decks-demos-and-runs)
+- [Learning from runs](#learning-from-runs-logs-expire) · [Chat](#chat) · [Robot rehearsal](#robot-rehearsal)
+- [Demos: the live AI operator](#demos-the-live-ai-operator)
+- [Storage](#storage-supabase-or-local) · [Deploying to Vercel](#deploying-to-vercel) · [Branches and migrations](#branches-and-migrations)
+- [Deck flow](#flow) · [Plans and analysis](#plans-and-analysis) · [Present controls](#present-controls)
+- [How matching and restraint work](#how-matching-and-restraint-work) · [Speech engines](#speech-engines)
+- [API](#api) · [Environment variables](#environment-variables) · [Known limitations](#known-limitations) · [Layout](#layout)
 
 ## Setup
 
@@ -23,9 +40,11 @@ whole flow without calling the vision model.
 | Script | What it does |
 |---|---|
 | `npm run dev` | Server (tsx watch) + Vite client together |
-| `npm test` | Vitest: matcher, restraint state machine, zoom math, end-to-end scripted scenarios |
-| `npm run build` | Type-check + production build of the client, type-check of the server |
+| `npm test` | Client tests (matcher, restraint, zoom, commands, scripted scenarios) and runner tests (safety, pacing, cue gate, secrets, learning) |
+| `npm run build` | Type-check + production build of the client, type-check of the server and the runner |
 | `npm run make-sample` | Regenerates `client/public/sample/sample.pdf` + `sample.regions.json` |
+| `npm run stage:dev` | App, server and demo runner together, with local storage (see [Demos](#demos-the-live-ai-operator)) |
+| `npm run stage:install` / `stage:uninstall` | Starts `stage:dev` at login on this Mac, or stops doing so |
 
 ## Projects, decks, demos and runs
 
@@ -40,8 +59,9 @@ whole flow without calling the vision model.
 - A demo's cover is a screenshot from its recording, chosen on the demo's page. It's served by the runner on your Mac,
   so it only shows while the runner is running.
 - A **run** is one time you presented a deck. It's saved when you leave the presenter (runs under 5 s are skipped) and
-  records the slides shown, every zoom, every voice command and what was heard. Run history isn't linked from the
-  app right now, but runs are still saved and each one's page still works at `#/r/<id>`.
+  records the slides shown, every zoom (with its score and how long it took to fire after you spoke), every voice
+  command and what was heard. Back in the editor, a "Run complete" banner links to the run log (`#/r/<id>`), which
+  shows the timeline, average/min/max zoom latency and a **Download log** button. There's no list of past runs.
 - Region edits autosave as you work. The top bar shows Saving…/Saved.
 
 ## Learning from runs (logs expire)
@@ -49,7 +69,7 @@ whole flow without calling the vision model.
 Every run improves the next one, with no action needed:
 
 - **Decks:** when a run is saved, the server reads what you said on each slide and adds phrases you actually used to
-  that slide's regions, so later runs zoom on your own wording.
+  that slide's regions, so later runs zoom on your own wording. This is a text-only call on Haiku 5.5.
 - **Demos:** after each dry run, the runner saves a log on this Mac with what you said before each cue, whether the AI
   finished it, and its moves. It then reads that run with the demo's other recent runs and adds new trigger phrases
   (only words you really said) and, for cues that failed or needed a second try, a short lesson the AI reads on its
@@ -98,15 +118,17 @@ it aloud, each word goes straight to the cue engine as it's said, and your mic s
 
 Each script and each piece of feedback is one Claude call, recorded in usage as `rehearse`.
 
-## Stage (in progress)
+## Demos: the live AI operator
 
-Stage is an AI operator for live software demos: you talk, and it performs the demo on your Mac. It always acts live
-from the real screen, and nothing is replayed. While you're still talking, it decides its next actions and holds them
-until you reach that moment, then checks the screen hasn't changed and runs them. If it has changed, it decides again.
+This part is still in progress. You talk, and the AI performs the demo on your Mac. It always acts live from the real
+screen, and nothing is replayed. While you're still talking, it decides its next actions and holds them until you reach
+that moment, then checks the screen hasn't changed and runs them. If it has changed, it decides again.
 
-It has two parts: the runner in `runner/`, a local process with a Swift helper for screen and input, and the Demos tab.
-The app has three tabs: Projects, Decks and Demos. A project holds decks and demos together, and either can also stand on
-its own. It runs on your Mac because a web page can't control other apps and Vercel can't reach your computer.
+It has two parts: the runner in `runner/`, a local process with a Swift helper (`runner/helper/StageHelper.swift`) for
+screen and input, and the Demos tab in the app. It runs on your Mac because a web page can't control other apps and
+Vercel can't reach your computer. The page talks to the runner over a WebSocket on `127.0.0.1:8788` (`STAGE_PORT`). The
+runner only accepts the app's own origin, and hands that origin a pairing token at `/pair`, which the page keeps in
+localStorage. The runner uses Opus 5.5 by default (`STAGE_MODEL`).
 
 Stage runs in the background whenever you're logged in, so there's nothing to start: open <http://localhost:5180> and
 choose New → Demo. The page pairs with the runner by itself, and until the runner is ready it says what it's waiting
@@ -136,10 +158,9 @@ Stage by hand instead, uninstall and use `npm run stage:dev`.
    Right arrow also move on. Each cue is scored. Set `STAGE_PACE` in `.env` to change how fast it moves. Dry runs don't reset your demo yet, so put it back
    to its starting state yourself between runs.
 
-`stage:dev` uses its own ports and stores data in `data/`, away from Supabase and from any other dev server. The runner
+`stage:dev` uses its own ports (app on 5180, server on 8790) and stores data in `data/`, away from Supabase and from any other dev server. The runner
 also works with the regular dev app (`npm run dev`, <http://localhost:5173>), whose demos are saved to Supabase; their
-recordings still stay on this Mac. Using demos with Supabase needs the `producer.shows` migration, which applies when it
-reaches production.
+recordings still stay on this Mac.
 
 | Command | What it does |
 |---|---|
@@ -164,7 +185,10 @@ terminal commands you haven't taught it, and buttons like Delete, Send or Pay un
 added them in review. `--goal` runs from the command line ask you instead. It recognizes risky buttons by their names in
 English, so an unlabelled icon isn't caught. It treats on-screen
 text as data, never as instructions, and has a limit on actions and time per cue. It needs two displays for desktop
-control.
+control. `STAGE_DISPLAY` picks the audience display by part of its name (default: the first one that isn't the main one).
+
+**Practice demo:** `practice/` holds a two-minute Terminal demo (a tiny to-do app with tests) for trying all of this.
+`practice/SCRIPT.md` has what to say and do for each cue, and `practice/reset.sh` puts it back between dry runs.
 
 ## Storage: Supabase or local
 
@@ -173,11 +197,13 @@ dedicated `producer` Postgres schema, defined in `supabase/migrations/`:
 
 | Table | Holds |
 |---|---|
-| `producer.matters` | Projects |
-| `producer.decks` | Presentations: name, file hash, slide count, analyzed flag, Storage paths |
-| `producer.regions` | One row per region: slide, order, label, description, `keywords text[]`, box (CHECKed to stay on the slide) |
+| `producer.matters` | Projects. `solo` marks the hidden one a lone deck or demo lives in; `deck_mode` is single or multiple |
+| `producer.decks` | Presentations: name, file hash, slide count, analyzed flag, Storage paths, the director's `plan` |
+| `producer.regions` | One row per region (cue): slide, order, label, description, `keywords text[]`, box (CHECKed to stay on the slide) |
 | `producer.runs` | One row per presentation run, with stored stats |
 | `producer.run_events` | The run timeline: slide changes, zooms, voice commands, what was heard |
+| `producer.shows` | Demos: their cues (beats), limits, cover and recording id. Recordings themselves stay on the Mac |
+| `producer.analysis_usage` | Every billed Claude call: kind (`plan`, `slide`, `region`, `rehearse`), tokens and cost |
 
 Deleting a matter cascades to its decks, regions, runs and events. Triggers keep `updated_at` and each matter's
 last-activity time current. The views `matter_summaries`, `deck_summaries` and `run_summaries` feed the lists. Deck files and
@@ -205,7 +231,19 @@ leaves an unused file in the bucket.
    no login of its own, so without this anyone with the URL can read and delete your matters and use your API keys.
 
 The server's build command is `npm run typecheck` on purpose: an explicit build command makes Vercel skip its own type
-check, which doesn't work with TypeScript 7. Vercel still bundles the server.
+check, which doesn't work with TypeScript 7. Vercel still bundles the server. `vercel.json` sends `/api/*` to the
+server and everything else to the client.
+
+If the hosted app starts returning 500s after a quiet week, check whether the Supabase project was paused (free plan
+projects pause when idle) and restore it from the Supabase dashboard.
+
+## Branches and migrations
+
+- Work goes into `before-Prod` first (directly or through a feature branch), and `before-Prod` is merged into
+  `master`. Pushing `master` deploys to production on Vercel.
+- Supabase applies everything in `supabase/migrations/` when it reaches `master`, including migrations already pasted
+  into the SQL editor by hand. So every migration must be safe to run twice: use `if not exists`, `create or replace`,
+  and drop-then-add for constraints.
 
 ## Flow
 
@@ -259,6 +297,10 @@ overview, and words spoken then don't count afterward. After that only the next 
 unique to that region, or one word plus a lead-in like "if you look at". Saying one of a region's own phrases fires it
 in any order, so going back or skipping ahead works.
 
+**Lead-ins on other slides.** On slides without cues, a lead-in like "let me show you", "moving on to" or "when it comes
+to" within the last 4 s boosts the best-matching region, as long as it already scores at least 0.2, so natural
+introductions fire without repeating exact keywords (`client/src/engine/director.ts`).
+
 **Timings tune themselves.** `tuneForSlide` (`client/src/engine/tune.ts`) sets them per slide from what's on it and the
 presenter's measured pace: a longer overview for fuller slides, more hold time for bigger regions, and a longer
 transcript window for slower speakers. The debug panel's sliders remain as a developer tool.
@@ -311,7 +353,7 @@ in `commands.test.ts`.
 All of this is pure TypeScript with no DOM or timers (`client/src/engine/`), driven by a 100 ms tick in `PresentView`.
 
 - **Window** (`transcriptWindow.ts`): the last ~6 s of transcript. Interim results replace each other and count at
-  0.6× weight.
+  0.85× weight. A final result from the speech engine runs a tick at once instead of waiting for the next 100 ms.
 - **Matcher** (`matcher.ts`): words are lowercased, stopwords and fillers are dropped, and the rest are Porter-stemmed. Each region
   is scored by its keywords (1.0) and label words (0.6), using the best match per term. Matches can be exact or fuzzy
   (Damerau-Levenshtein similarity ≥ 0.8 for words of 4+ letters; numbers must match exactly). Words count less as they age
@@ -319,12 +361,13 @@ All of this is pure TypeScript with no DOM or timers (`client/src/engine/`), dri
   count 1/k. The raw sum is squashed to 0–1.
 - **Restraint** (`restraint.ts`):
   - Zoom only if the top score ≥ **0.45** *and* beats #2 by ≥ **0.15**.
-  - Stay at least **3 s** before switching to another region.
+  - Stay up to **3 s** before switching to another region. The wait shrinks as the new region's score rises toward
+    certainty, and hearing one of its trigger phrases switches at once. Ambiguous speech gets the full 3 s.
   - Stay zoomed while the current region keeps scoring ≥ 0.25. Zoom out **4 s** after it stops.
   - After zooming out, a **0.8 s** cooldown prevents flapping.
   - A slide change zooms out instantly and clears the window. Esc zooms out and holds off for 1.5 s.
 - **Zoom** (`zoom.ts`): scale to fit the region plus padding, capped at 3×. Translation is clamped so the slide always covers
-  the viewport, so you never see area outside the slide. Rendering uses a CSS transform (600 ms ease) with a dim overlay cut out
+  the viewport, so you never see area outside the slide. Rendering uses a CSS transform (450 ms ease) with a dim overlay cut out
   around the region.
 
 ## Speech engines
@@ -344,13 +387,54 @@ Two engines sit behind the same `SpeechSource` interface (`client/src/speech/`),
 `ScriptedSpeechSource` replays a timestamped script and powers the debug panel's simulate box. To add another
 provider, implement `SpeechSource` and add it to the engine switch in `PresentView.tsx`.
 
+## API
+
+All under `/api` (`server/src/index.ts` and `server/src/library.ts`):
+
+| Route | Does |
+|---|---|
+| `GET /health` | Whether the server is up, its model and plan, and whether the Claude and Deepgram keys are set |
+| `GET /home` | Recent decks, demos and projects for the Home tab |
+| `POST /matters`, `GET/PATCH/DELETE /matters/:id` | Create, read, rename or delete a project (deleting cascades) |
+| `POST /matters/:id/decks/upload`, `PUT /uploads/:deckId` | Get an upload target (signed Storage URL, or the local `PUT`) |
+| `POST /matters/:id/decks` | Register an uploaded deck |
+| `GET/PATCH/DELETE /decks/:id` | Read, save (regions, name, or move to another project) or delete a deck |
+| `GET /decks/:id/file`, `GET/PUT /decks/:id/thumb` | The original file, and the cover thumbnail |
+| `GET /decks/:id/usage` | A deck's total Claude cost |
+| `POST /analyze` | Analyze one slide image |
+| `POST /analyze/region` | Work out keywords and phrases for one drawn cue |
+| `POST /decks/:id/plan` | The whole-deck director (Premium) |
+| `POST /decks/:id/cues/chat` | One Chat message in the deck editor |
+| `POST /decks/:id/rehearse/script`, `/rehearse/feedback` | Robot rehearsal for a deck |
+| `POST /shows/:id/rehearse/script`, `/rehearse/feedback` | Robot rehearsal for a demo |
+| `POST /runs`, `GET/DELETE /runs/:id` | Save a run (then learn from it and expire old ones), read or delete one |
+| `GET /shows`, `GET/POST /matters/:id/shows`, `GET/PATCH/DELETE /shows/:id` | Demos |
+| `POST /stt/session` | A short-lived Deepgram token and streaming URL |
+
+## Environment variables
+
+Everything goes in `.env` (see `.env.example`, which explains each one). All are server-side only.
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude, for analysis, Chat, rehearsal, learning and the demo runner |
+| `PRODUCER_PLAN` | `premium` (default) or `free` |
+| `VISION_MODEL`, `VISION_EFFORT` | Override the plan's model and effort |
+| `DEEPGRAM_API_KEY`, `DEEPGRAM_MODEL` | Faster live speech (Member role or higher); default `nova-3` |
+| `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Supabase storage; leave all empty for local files |
+| `PRODUCER_STORE=file` | Use local files even when Supabase is configured |
+| `DATA_DIR` | Where local data goes (default `./data`) |
+| `PORT` | Server port (default 8787) |
+| `LOG_RETENTION_DAYS` | Days to keep run logs (default 15) |
+| `STAGE_MODEL`, `STAGE_DISPLAY`, `STAGE_PORT`, `STAGE_PACE` | Demo runner: model, audience display, port, speed |
+
 ## Known limitations
 
 - **Chrome only for the built-in engine.** (Deepgram works in any modern browser.) The Web Speech API isn't available in Firefox, and Safari's version is unreliable.
   Elsewhere the HUD shows "No mic" and the simulate box still works.
 - **Web Speech is cloud-based.** Chrome sends audio to Google. It needs a network connection, adds roughly 300–1000 ms of
-  latency, and ends sessions on its own. Stage restarts it automatically, with backoff after errors. A dedicated
-  streaming STT would be faster and more private.
+  latency, and ends sessions on its own. Stage restarts it automatically, with backoff after errors. Deepgram is the
+  faster option.
 - **Vision bounding boxes are approximate.** Models are good at what a region is and what words describe it, but boxes
   are often off by 5–20%. Expect to fix boxes in Review. The sample deck's regions are exact on purpose, so you can judge
   the zoom effect apart from detection quality.
@@ -358,8 +442,9 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
   the phrases you actually say is the fix for now.
 - Esc as "zoom out" while full-screen relies on Chrome's Keyboard Lock API. Without it, the browser takes the first Esc
   to exit full-screen (Stage also zooms out when that happens).
-- Single-user storage: one JSON file on the server, no accounts. Opening a deck re-renders its file in the browser
-  (the last 3 decks stay cached for the tab).
+- Single user, no accounts: everyone who can reach the app shares the same data, and one plan applies to all of it.
+  Opening a deck re-renders its file in the browser (the last 3 decks stay cached for the tab).
+- Dry runs don't reset a demo's starting state, and demo recordings only exist on the Mac that recorded them.
 - A run is saved when the presenter closes. If the tab is closed mid-presentation it's sent with `sendBeacon`, which
   is best-effort.
 - Rendering is at ~1600 px wide JPEG, so very small text will get soft at 3× zoom.
@@ -367,13 +452,28 @@ provider, implement `SpeechSource` and add it to the engine switch in `PresentVi
 ## Layout
 
 ```
-shared/schema.ts          zod schemas shared by client + server (Region, ProducerFile)
-server/src/               Express: /api/health, /api/analyze (Claude vision, validate, retry), stt.ts (Deepgram tokens),
-                          library.ts (routes), store.ts (local JSON), supabaseStore.ts (Postgres + Storage)
-supabase/migrations/      the `producer` schema
+shared/schema.ts          zod schemas shared by client, server and runner (decks, regions, runs, shows, log retention)
+shared/plans.ts           Free and Premium plans, effort per cue type, prices
+shared/rehearse.ts        robot rehearsal types shared by client and server
+server/src/index.ts       Express app: analysis, director, Chat, rehearsal and STT routes; run learning and expiry
+server/src/library.ts     projects, decks, runs and demos routes
+server/src/analyze.ts     Claude calls (vision, director, region, learning), validation, retries, usage records
+server/src/prompt.ts      prompts and response schemas
+server/src/cueChat.ts     the deck editor's Chat
+server/src/rehearse.ts    robot rehearsal scripts and feedback
+server/src/stt.ts         Deepgram tokens
+server/src/store.ts       the storage interface and local JSON store; supabaseStore.ts is Postgres + Storage
+supabase/migrations/      the `producer` schema (each migration safe to rerun)
+client/src/engine/        pure matching, restraint, guidance, director, tuning, zoom and voice-command logic + tests
+client/src/speech/        SpeechSource interface: Deepgram, Web Speech, robot (rehearsal) and scripted sources
+client/src/components/    LibraryView (Home and tabs), DeckView (Review → Present), ReviewEditor, PresentView,
+                          CueOverlay, CueChat, DeckRehearsal, RehearsalChat, ShowView (demos), RunView, DebugPanel
+client/src/lib/           api client, hash router, deck upload/cache, PDF and PowerPoint rendering, runner link (stage.ts)
+runner/src/               the demo runner: index (CLI), server (WebSocket + pairing), session, agent, recorder,
+                          learn (recording → cues), improve (learning from dry runs), cueGate, pace, safety, secrets,
+                          desktop and browser drivers
+runner/helper/            Swift helper for screenshots and input on macOS
+practice/                 a practice Terminal demo and its script
 scripts/make-sample.ts    pdfkit sample deck + exact regions
-client/src/engine/        pure matching / restraint / zoom logic + tests
-client/src/speech/        SpeechSource interface, Web Speech + scripted implementations
-client/src/components/    Home, Matter, Deck (Review → Present), Run, Debug panel
-client/src/lib/           api client, hash router, deck upload/cache, PDF and PowerPoint rendering
+scripts/stage-agent.ts    installs or removes the login item for `stage:dev`
 ```
