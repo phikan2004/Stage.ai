@@ -1,4 +1,4 @@
-# Stage
+# Stage.ai
 
 A prototype that helps you present. It listens while you talk and does two things:
 
